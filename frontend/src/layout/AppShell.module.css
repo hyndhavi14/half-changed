@@ -22,3 +22,16 @@
   margin: 0;
   color: var(--text-2);
 }
+
+.authForm {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
+
+.authForm input {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #bba58c);
+  border-radius: 8px;
+}

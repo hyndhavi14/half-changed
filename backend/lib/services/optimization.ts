@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { ServiceUnavailableError, ValidationError } from '../errors'
+import { InternalError, ServiceUnavailableError, ValidationError } from '../errors'
 import {
   createOptimizerTransport,
   isOptimizerConfigured,
@@ -23,6 +23,7 @@ import {
 } from '../optimizer/client'
 import { buildOptimizationProblem } from '../optimizer/payload'
 import type { OptimizationProblem, OptimizationSolution } from '../optimizer/contract'
+import { buildOptimizationScheduleWrites } from '../optimizer/scheduleMapping'
 import { energyTimeWindow } from '../repositories/energy-data'
 import { listTariffsForHorizon } from '../repositories/electricity-tariffs'
 import { machinesRepository } from '../repositories/machines'
@@ -35,6 +36,8 @@ import {
 import { processDependenciesRepository, processesRepository } from '../repositories/processes'
 import { productionOrdersRepository } from '../repositories/production-orders'
 import { energyDataRepository, listEnergyData } from '../repositories/energy-data'
+import { persistOptimizationSchedules } from '../repositories/schedules'
+import type { PersistedOptimizationSchedule } from '../repositories/schedules'
 import type {
   OptimizationRequestCreate,
   OptimizationRequestRow,
@@ -241,6 +244,8 @@ export interface RunOptimizationResult {
   request: OptimizationRequestRow
   /** Present only when a real optimizer produced a solution. */
   solution: OptimizationSolution | null
+  /** Draft schedules created atomically after the result was audited. */
+  schedules: PersistedOptimizationSchedule[]
 }
 
 /**
@@ -269,7 +274,7 @@ export async function runOptimization(
       } as Record<string, unknown>,
     })
 
-    return { request: updated, solution: null }
+    return { request: updated, solution: null, schedules: [] }
   }
 
   const config = readOptimizerConfig()
@@ -320,15 +325,45 @@ export async function runOptimization(
     metrics: solution.metrics,
   })
 
-  const updated = await optimizationRequestsRepository.update(factoryId, optimizationRequest.id, {
-    status: 'succeeded',
-    adapter_metadata: {
-        adapter: transport.name,
-        optimization_result_id: result.id,
-      } as Record<string, unknown>,
-  })
-
-  return { request: updated, solution }
+  try {
+    const scheduleWrites = buildOptimizationScheduleWrites(problem, solution)
+    const persisted = await persistOptimizationSchedules(
+      factoryId,
+      optimizationRequest.id,
+      result.id,
+      transport.name,
+      scheduleWrites,
+    )
+    return { request: persisted.request, solution, schedules: persisted.schedules }
+  } catch (error) {
+    const failureMessage = `Schedule persistence failed after optimizer result ${result.id} was retained.`
+    try {
+      await optimizationRequestsRepository.update(factoryId, optimizationRequest.id, {
+        status: 'failed',
+        error_message: failureMessage,
+        adapter_metadata: {
+          adapter: transport.name,
+          optimization_result_id: result.id,
+          schedule_persistence_status: 'failed',
+        },
+      })
+    } catch (recordError) {
+      throw new InternalError(
+        'Schedule persistence failed after the optimizer result was retained, and the request failure could not be recorded.',
+        {
+          optimization_request_id: optimizationRequest.id,
+          optimization_result_id: result.id,
+          schedule_persistence_status: 'failed',
+        },
+        recordError,
+      )
+    }
+    throw new InternalError(failureMessage, {
+      optimization_request_id: optimizationRequest.id,
+      optimization_result_id: result.id,
+      schedule_persistence_status: 'failed',
+    }, error)
+  }
 }
 
 /** Optimizer readiness, surfaced by the health endpoint and factory summary. */

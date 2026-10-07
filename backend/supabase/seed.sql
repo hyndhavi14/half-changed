@@ -181,13 +181,13 @@ select f.id, v.slug, v.name, v.description, v.duration, m.id,
 from public.factories f
 join (values
   ('roast-bean-blend',  'Roast Bean Blend',  'DEMO. Blend and roast cocoa beans.',                 120, 'roasting-drum',  250.0,  500.0, 'kg', '{"demo": true, "stage": "roasting", "temperature_c": {"min": 110, "max": 150}}'),
-  ('grind-nibs',        'Grind Nibs',        'DEMO. Crack and grind roasted nibs.',                45,  'roasting-drum',  200.0,  480.0, 'kg', '{"demo": true, "stage": "grinding"}'),
+  ('grind-nibs',        'Grind Nibs',        'DEMO. Crack and grind roasted nibs.',                60,  'roasting-drum',  200.0,  480.0, 'kg', '{"demo": true, "stage": "grinding"}'),
   ('conche-refine',     'Conche Refine',     'DEMO. Refine mass in the conche.',                   300, 'refining-conche', 165.0, 450.0, 'kg', '{"demo": true, "stage": "refining"}'),
   ('age-maturation',    'Age Maturation',    'DEMO. Hold mass for maturation.',                     720, 'refining-conche',  60.0, 450.0, 'kg', '{"demo": true, "stage": "maturation", "blocking": true}'),
   ('temper-mass',       'Temper Mass',       'DEMO. Temper the mass to the required curve.',        60,  'tempering-unit',  85.0,  400.0, 'kg', '{"demo": true, "stage": "tempering", "temperature_c": {"min": 28, "max": 34}}'),
-  ('mould-shell',       'Mould Shell',       'DEMO. Deposit shells in moulds.',                      35,  'moulding-line',   130.0, 3000.0, 'kg', '{"demo": true, "stage": "moulding"}'),
-  ('cool-and-demould',  'Cool And Demould',  'DEMO. Cool then demould the shells.',                  25,  'cooling-tunnel',   95.0, 3000.0, 'kg', '{"demo": true, "stage": "cooling", "blocking": true}'),
-  ('pack-retail',       'Pack Retail',       'DEMO. Wrap and case the product for retail.',          40,  'packing-cell',     38.0, 3000.0, 'kg', '{"demo": true, "stage": "packing"}')
+  ('mould-shell',       'Mould Shell',       'DEMO. Deposit shells in moulds.',                      60,  'moulding-line',   130.0, 3000.0, 'kg', '{"demo": true, "stage": "moulding"}'),
+  ('cool-and-demould',  'Cool And Demould',  'DEMO. Cool then demould the shells.',                  30,  'cooling-tunnel',   95.0, 3000.0, 'kg', '{"demo": true, "stage": "cooling", "blocking": true}'),
+  ('pack-retail',       'Pack Retail',       'DEMO. Wrap and case the product for retail.',          30,  'packing-cell',     38.0, 3000.0, 'kg', '{"demo": true, "stage": "packing"}')
 ) as v(slug, name, description, duration, machine_slug, power_kw, qty, unit, metadata) on true
 join public.machines m
   on m.factory_id = f.id
@@ -271,14 +271,14 @@ select
   15,
   round((600 + 260 * (0.5 + 0.5 * sin(2 * pi() * extract(epoch from t.ts) / 86400.0))
         + 35 * sin(17.0 * extract(epoch from t.ts) / 3600.0))::numeric, 4),
-  -- PV output only during daylight, and only from the array's peak rating.
+  -- Hourly solar power is quantized to 0.2 kW, then converted to 15-minute kWh.
   case
     when extract(hour from t.ts at time zone 'Europe/Amsterdam') between 8 and 17
-      then round((280 * greatest(0.0, sin(pi() * (extract(hour from t.ts at time zone 'Europe/Amsterdam') - 8) / 9.0)))::numeric, 4)
+      then round((280 * greatest(0.0, sin(pi() * (extract(hour from t.ts at time zone 'Europe/Amsterdam') - 8) / 9.0)))::numeric * 5) / 20
     else 0
   end,
   null,
-  'measured',
+  'simulated',
   '{"demo": true, "note": "synthetic demonstration series"}'::jsonb
 from public.factories f
 cross join generate_series(
@@ -287,7 +287,9 @@ cross join generate_series(
   interval '15 minutes'
 ) as t(ts)
 where f.slug = 'demo-chocolate-factory'
-on conflict do nothing;
+on conflict do update set
+  generation_kwh = excluded.generation_kwh,
+  source = excluded.source;
 
 -- ---------------------------------------------------------------------------
 -- 7. Electricity tariffs  (time-of-use)
@@ -300,9 +302,9 @@ select f.id, v.slug, v.name, 'EUR', v.start_time, v.end_time, v.days_of_week,
        v.price, v.demand, v.fixed, v.tax, now(), v.priority, v.metadata::jsonb
 from public.factories f
 cross join (values
-  ('off-peak',  'DEMO. Off-peak (night)',        '00:00'::time, '07:00'::time, null,
+  ('off-peak',  'DEMO. Off-peak (night)',        '22:00'::time, '07:00'::time, null,
    0.0850, 0.0, 0.0, 0.21, 10, '{"demo": true, "band": "off_peak"}'::text),
-  ('shoulder',  'DEMO. Shoulder',                 '07:00'::time, '17:00'::time, null,
+  ('shoulder',  'DEMO. Shoulder',                 '07:00'::time, '22:00'::time, null,
    0.1420, 0.0, 0.0, 0.21, 10, '{"demo": true, "band": "shoulder"}'::text),
   ('peak',      'DEMO. Peak (weekday evening)',   '17:00'::time, '22:00'::time,
    array[1, 2, 3, 4, 5]::smallint[],

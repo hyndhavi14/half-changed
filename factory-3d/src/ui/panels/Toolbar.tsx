@@ -5,7 +5,13 @@ import { LAYOUT } from '../../config/layout';
 import { cameraApi } from '../../three/cameras/cameraApi';
 import { BrandLogo } from './BrandLogo';
 
-export function Toolbar() {
+export function Toolbar({
+  readOnly = false,
+  dataLabel = 'sample data',
+}: {
+  readOnly?: boolean;
+  dataLabel?: string;
+}) {
   const machines = useMachineStore((s) => s.machines);
   const { activeView, selectedId, showLabels, showEnergy, showDebug, mode, set } = useViewStore(
     useShallow((s) => ({ activeView: s.activeView, selectedId: s.selectedId, showLabels: s.showLabels, showEnergy: s.showEnergy, showDebug: s.showDebug, mode: s.mode, set: s.set })),
@@ -17,7 +23,7 @@ export function Toolbar() {
         <BrandLogo size={34} />
         <div>
           <h1>Chocolate Factory</h1>
-          <p>ByteMe digital twin, sample data</p>
+          <p>ByteMe digital twin, {dataLabel}</p>
         </div>
       </div>
       <div className="panel tools">
@@ -58,7 +64,7 @@ export function Toolbar() {
           }}
         >
           <option value="">Go to machine…</option>
-          {LAYOUT.map((d) => (
+          {LAYOUT.filter((d) => !readOnly || machines[d.id]).map((d) => (
             <option key={d.id} value={d.id}>
               {d.stage} · {machines[d.id]?.name ?? d.id}
             </option>
@@ -71,9 +77,11 @@ export function Toolbar() {
         <button className="btn ghost" type="button" aria-pressed={showEnergy} onClick={() => set({ showEnergy: !showEnergy })}>
           Energy flow
         </button>
-        <button className="btn ghost" type="button" aria-pressed={showDebug} onClick={() => set({ showDebug: !showDebug })}>
-          Debug
-        </button>
+        {!readOnly && (
+          <button className="btn ghost" type="button" aria-pressed={showDebug} onClick={() => set({ showDebug: !showDebug })}>
+            Debug
+          </button>
+        )}
       </div>
     </header>
   );

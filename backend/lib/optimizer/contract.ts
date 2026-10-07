@@ -5,9 +5,9 @@
  * READ THIS BEFORE EDITING ANYTHING IN THIS DIRECTORY
  * ------------------------------------------------------------------------
  *
- * The optimizer is a separate Python + OR-Tools service written by another
- * person. Its endpoint, HTTP method, request body, response body, auth scheme
- * and URL are NOT yet agreed, and this file deliberately does not guess them.
+ * The optimizer is a separate Python + OR-Tools library with a documented
+ * public API. Backend/Python shape conversion lives in pythonPayload.ts and
+ * pythonResponse.ts; process invocation lives in pythonSubprocess.ts.
  *
  * What lives here is only ByteMe's OWN side of the boundary:
  *
@@ -15,13 +15,9 @@
  *   - `OptimizationSolution`  the minimum shape ByteMe is willing to store.
  *
  * `lib/optimizer/payload.ts` turns database rows into an `OptimizationProblem`.
- * `lib/optimizer/client.ts` transmits it through an `OptimizerTransport` and
- * validates the reply into an `OptimizationSolution`.
- *
- * Once your teammate confirms the Python interface, the ONLY files that need
- * to change are `client.ts` (URL, method, headers) and, if the response shape
- * differs from `OptimizationSolution`, the decoder in `client.ts`. The
- * routes, repositories and schema stay exactly as they are.
+ * `lib/optimizer/client.ts` selects the explicitly configured HTTP or local
+ * Python subprocess transport. Python v2 results are validated and projected
+ * into an `OptimizationSolution` without changing the public Python API.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -171,6 +167,8 @@ export interface OptimizationSolution {
   totalEnergyKwh: number | null
   peakDemandKw: number | null
   entries: SolutionEntry[]
+  /** Baseline plan when the Python API returned one; absent for other transports. */
+  baselineEntries?: SolutionEntry[] | null
   /** Solver statistics: runtime, iterations, gap, solver name, ... */
   metrics: Record<string, unknown>
   /**
@@ -220,29 +218,21 @@ export interface OptimizerTransport {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Open questions for the optimizer team. ByteMe makes no default assumption
- * about any of them; they are configuration, not code.
+ * Known limitations of the initial mock integration.
  *
- *  1. Endpoint path and HTTP method for submitting a problem.
- *  2. Whether the problem is sent as the `OptimizationProblem` document above,
- *     or translated into a Python-specific schema (and what that schema is).
- *  3. Response body shape, and how scheduled intervals are expressed.
- *  4. Whether the solve is synchronous or returns a job id to poll.
- *  5. Authentication: none, static bearer token, mTLS, or something else.
- *  6. Concurrency limits and maximum problem size.
- *  7. Idempotency: how to safely retry a submission.
- *  8. Units: ByteMe sends kW, kWh, minutes and ISO-8601 UTC timestamps.
- *     Confirm the optimizer expects the same, or agree a conversion here.
+ *  1. Machine availability calendars are informational to Python, not enforced.
+ *  2. Python defaults flexibility to true and machine capacity to one.
+ *  3. Python does not model order-to-process relations, tariff demand/fixed
+ *     charges, or taxes.
+ *  4. The Python adapter accepts whole-hour horizons of at least 24 hours,
+ *     exact whole-minute process durations, zero-lag finish-to-start edges
+ *     and 0.2 kW solar precision. Energy profiles are full-horizon hourly
+ *     values for this transport.
  */
 export const OPEN_OPTIMIZER_QUESTIONS: readonly string[] = [
-  'Endpoint path and HTTP method for submitting a problem',
-  'Whether to consume OptimizationProblem directly or a Python-specific schema',
-  'Response body shape, including how scheduled intervals are expressed',
-  'Synchronous solve versus submit-and-poll job id',
-  'Authentication scheme (none, bearer token, mTLS, other)',
-  'Concurrency limits and maximum problem size',
-  'Idempotency and retry semantics',
-  'Unit agreement (kW, kWh, minutes, ISO-8601 UTC)',
+  'Set BYTEME_OPTIMIZER_TRANSPORT=python-subprocess and configure the Python executable',
+  'Confirm that the complete selected horizon is covered by synthetic energy rows and applicable tariffs',
+  'Review the documented optimizer limitations before treating the demo result as meaningful',
 ]
 
 /** Version of the problem/solution document. Bump on breaking changes. */

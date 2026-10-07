@@ -1,64 +1,44 @@
 import Card from '../../components/Card/Card'
 import PageHeader from '../../components/PageHeader/PageHeader'
-import ProgressBar from '../../components/ProgressBar/ProgressBar'
-import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
-import { FactoryFloorPlan } from '../FactoryViewPage/FactoryViewPage'
-import styles from './ProcessesPage.module.css'
+import { displayValue, machineName, processName } from '../../data/backendView'
 
 export default function ProcessesPage() {
-  const { factory } = useFactory()
-  const machines = factory.stages.flatMap((stage) =>
-    stage.machines.map((machine) => ({ machine, stage })),
-  )
+  const { backendData, loading, error } = useFactory()
+  if (!backendData) return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
+  const data = backendData
 
   return (
-    <div className={styles.page}>
-      <PageHeader eyebrow={factory.name} title="Processes & machines" />
-
-      <FactoryFloorPlan key={factory.id} factory={factory} />
-
-      <Card title="All machines" className={styles.machineCard}>
-        <div className={styles.tableScroller}>
-          <table className={styles.machineTable}>
-            <caption className={styles.visuallyHidden}>
-              Machines, stages, rated power, status, and utilization
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Machine</th>
-                <th scope="col">Stage</th>
-                <th scope="col">Type</th>
-                <th scope="col">Rated power</th>
-                <th scope="col">Status</th>
-                <th scope="col">Utilization</th>
-              </tr>
-            </thead>
-            <tbody>
-              {machines.map(({ machine, stage }) => (
-                <tr key={machine.id}>
-                  <th scope="row">{machine.name}</th>
-                  <td>{stage.name}</td>
-                  <td>{machine.type[0].toUpperCase() + machine.type.slice(1)}</td>
-                  <td>{machine.ratedKw} kW</td>
-                  <td>
-                    <StatusChip status={machine.status} />
-                  </td>
-                  <td>
-                    <div className={styles.utilization}>
-                      <ProgressBar
-                        value={machine.utilization}
-                        ariaLabel={`${machine.name} utilization`}
-                      />
-                      <span>{machine.utilization}%</span>
-                    </div>
-                  </td>
+    <>
+      <PageHeader eyebrow={data.factory.name} title="Processes & machines" />
+      <Card title="Persisted processes and machine assignments">
+        {data.processes.length ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead><tr><th>Process</th><th>Assigned machine</th><th>Duration</th><th>Power requirement</th></tr></thead>
+              <tbody>{data.processes.map((process) => (
+                <tr key={process.id}>
+                  <th>{process.name}</th><td>{machineName(data, process.machineId)}</td>
+                  <td>{displayValue(process.durationMinutes, ' min')}</td>
+                  <td>{displayValue(process.powerRequirementKw, ' kW')}</td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              ))}</tbody>
+            </table>
+          </div>
+        ) : <p>No processes are persisted for this factory.</p>}
       </Card>
-    </div>
+      <Card title="Persisted machine inventory">
+        {data.machines.length ? (
+          <ul>{data.machines.map((machine) => <li key={machine.id}>{machine.name} · {machine.type ?? 'Type not specified'} · rated power {displayValue(machine.ratedPowerKw, ' kW')} · live status and utilization not reported</li>)}</ul>
+        ) : <p>No machines are persisted for this factory.</p>}
+      </Card>
+      <Card title="Process dependencies">
+        {data.dependencies.length ? (
+          <ul>{data.dependencies.map((edge) => (
+            <li key={edge.id}>{processName(data, edge.processId)} depends on {processName(data, edge.dependsOnProcessId)} · {edge.type}, lag {edge.lagMinutes} min</li>
+          ))}</ul>
+        ) : <p>No process dependencies are persisted for this factory.</p>}
+      </Card>
+    </>
   )
 }

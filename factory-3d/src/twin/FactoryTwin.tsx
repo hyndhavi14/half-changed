@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { MachineDataProvider } from '../data/types';
@@ -7,7 +8,9 @@ import { useLiveSimulation } from '../data/useLiveSimulation';
 import { useViewStore } from '../state/viewStore';
 import { useMachineStore } from '../state/machineStore';
 import { useEnergyStore } from '../state/energyStore';
+import { useScheduleStore } from '../state/scheduleStore';
 import { CAMERA, PRESETS, type PresetKey } from '../config/cameraPresets';
+import { LAYOUT_BY_ID, type MachineId } from '../config/layout';
 import { FactoryScene } from '../three/scene/FactoryScene';
 import { Toolbar } from '../ui/panels/Toolbar';
 import { InfoPanel } from '../ui/panels/InfoPanel';
@@ -30,6 +33,12 @@ export interface FactoryTwinProps {
   theme?: 'auto' | 'light' | 'dark';
   /** Run the 15 s live simulation (demo only). Default true. */
   simulate?: boolean;
+  /** Hide controls that can fabricate machine state. */
+  readOnly?: boolean;
+  /** Data source label shown in the toolbar. */
+  dataLabel?: string;
+  /** Optional scenario-specific, read-only overlay content. */
+  children?: ReactNode;
   className?: string;
 }
 
@@ -54,7 +63,17 @@ function useDarkTheme(root: React.RefObject<HTMLElement | null>, theme: 'auto' |
 }
 
 /** The ByteMe 3D chocolate factory. Fills its parent element. */
-export function FactoryTwin({ provider, onMachineSelect, initialView = 'reset', theme = 'auto', simulate = true, className }: FactoryTwinProps) {
+export function FactoryTwin({
+  provider,
+  onMachineSelect,
+  initialView = 'reset',
+  theme = 'auto',
+  simulate = true,
+  readOnly = false,
+  dataLabel = 'sample data',
+  children,
+  className,
+}: FactoryTwinProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   useDataSync(provider);
   useLiveSimulation(simulate);
@@ -62,11 +81,31 @@ export function FactoryTwin({ provider, onMachineSelect, initialView = 'reset', 
 
   const ready = useViewStore((s) => s.ready);
   const hasInfo = useViewStore((s) => !!s.selectedId);
+  const machineError = useMachineStore((s) => s.error);
+  const machines = useMachineStore((s) => s.machines);
+  const selectedSchedule = useScheduleStore((s) => s.schedule);
+  const scheduleError = useScheduleStore((s) => s.error);
+  const unplaced = Object.values(machines).filter((machine) => {
+    const layoutId = machine.layout_id ?? machine.machine_id;
+    return !Object.prototype.hasOwnProperty.call(LAYOUT_BY_ID, layoutId as MachineId);
+  });
+  const knownMachineIds = new Set(Object.values(machines).map((machine) => machine.machine_id));
+  const orphanedScheduleEntries = selectedSchedule?.entries.filter(
+    (entry) => !knownMachineIds.has(entry.machine_id),
+  ) ?? [];
 
   // Selection callback for the host app.
   const cb = useRef(onMachineSelect);
   cb.current = onMachineSelect;
-  useEffect(() => useViewStore.subscribe((s, prev) => s.selectedId !== prev.selectedId && cb.current?.(s.selectedId)), []);
+  useEffect(() => useViewStore.subscribe((s, prev) => {
+    if (s.selectedId === prev.selectedId) return;
+    const selected = s.selectedId
+      ? Object.values(useMachineStore.getState().machines).find(
+          (machine) => (machine.layout_id ?? machine.machine_id) === s.selectedId,
+        )
+      : undefined;
+    cb.current?.(selected?.machine_id ?? null);
+  }), []);
 
   // Console access in dev: __byteme.machineStore.getState() etc.
   useEffect(() => {
@@ -110,16 +149,46 @@ export function FactoryTwin({ provider, onMachineSelect, initialView = 'reset', 
           );
         }}
       >
-        <FactoryScene initialView={initialView} />
+        <FactoryScene
+          initialView={initialView}
+          showDemoProducts={!readOnly}
+          hideUnmappedMachines={readOnly}
+        />
       </Canvas>
       <Labels />
-      <Toolbar />
-      <InfoPanel />
-      <DebugPanel />
+      <Toolbar readOnly={readOnly} dataLabel={dataLabel} />
+      <InfoPanel readOnly={readOnly} />
+      {!readOnly && <DebugPanel />}
       <EnergyPanel />
       <Minimap />
       <WalkOverlay />
       <Toast />
+      {(machineError || scheduleError || selectedSchedule || unplaced.length > 0 || orphanedScheduleEntries.length > 0) && (
+        <div className="bm-data-state" role={machineError || scheduleError ? 'alert' : 'status'}>
+          {machineError && <p>Machine data refresh failed: {machineError}</p>}
+          {scheduleError && <p>Selected schedule could not be loaded: {scheduleError}</p>}
+          {selectedSchedule && (
+            <p>
+              Planned schedule v{selectedSchedule.version} · {selectedSchedule.status} ·{' '}
+              {selectedSchedule.horizon_start} to {selectedSchedule.horizon_end}
+            </p>
+          )}
+          {unplaced.length > 0 && (
+            <p>
+              {unplaced.length} backend machine(s) have no scene placement and are not shown:{' '}
+              {unplaced.map((machine) => `${machine.name} (${machine.machine_id})`).join(', ')}
+            </p>
+          )}
+          {orphanedScheduleEntries.length > 0 && (
+            <p>
+              {orphanedScheduleEntries.length} selected-schedule entry/entries reference machine UUIDs
+              absent from this factory response:{' '}
+              {Array.from(new Set(orphanedScheduleEntries.map((entry) => entry.machine_id))).join(', ')}
+            </p>
+          )}
+        </div>
+      )}
+      {children}
       {!ready && <div className="bm-loading">Building the factory…</div>}
     </div>
   );

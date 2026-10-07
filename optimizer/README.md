@@ -56,7 +56,7 @@ A factory is pure data following the generic schema:
     {
       "process_id": "step_x",            # unique, referenced by dependencies
       "process_name": "Step X",
-      "duration_hours": 1,               # multiple of 0.5 h (scheduling grid)
+      "duration_hours": 1,               # exact whole minutes, expressed as hours
       "power_kw": 10,                    # constant power while running
       "quantity": 100,                   # informational only; not optimized
       "dependencies": [],                # process_ids that must finish first
@@ -80,8 +80,9 @@ A factory is pure data following the generic schema:
 }
 ```
 
-Rules: `duration_hours` on the half-hour grid; `dependencies` must reference
-existing processes and be cycle-free; `machine_id` must exist in `machines`;
+Rules: `duration_hours` must represent an exact positive whole number of
+minutes; `dependencies` must reference existing processes and be cycle-free;
+`machine_id` must exist in `machines`;
 processes sharing a machine may overlap only within its declared capacity;
 every process must finish by `production_deadline` (and by its own
 `latest_finish` if given).
@@ -141,7 +142,7 @@ profiles), formatted by `format_validation_error(exc)`.
 
 ## 4. How optimization works
 
-The engine (Google OR-Tools CP-SAT, `TIME_SCALE = 2` → half-hour slots):
+The engine (Google OR-Tools CP-SAT, `TIME_SCALE = 60` → one-minute slots):
 
 - **Variables** — integer start/end per process; `end = start + duration`.
 - **Constraints** — planning horizon, production deadline, precedence
@@ -150,7 +151,7 @@ The engine (Google OR-Tools CP-SAT, `TIME_SCALE = 2` → half-hour slots):
   pinned to their baseline start times.
 - **V1 baseline** — minimize makespan.
 - **V2 solar-aware** — maximize the exact in-model solar energy under the
-  shared site-wide solar pool, allocated separately in each half-hour slot;
+  shared site-wide solar pool, allocated separately in each minute slot;
   makespan is the tiebreaker.
 - **V3/V4 cost-optimized** — minimize total grid electricity cost built
   exactly from the chosen start times (grid kWh × hourly tariff), makespan
@@ -190,7 +191,9 @@ objective uses exactly these definitions (verified by tests against an
 independent recomputation). Concurrent processes share the slot's solar
 allocation; solar is not independently credited to every process.
 
-All schedule times are relative to planning time 0 and use half-hour ticks.
+All schedule times are relative to planning time 0 and use exact whole-minute
+ticks. Horizon, deadline, and time-window bounds retain their existing
+half-hour rounding semantics.
 Hourly solar/tariff profile keys refer to elapsed hours from that origin and
 repeat every 24 hours for longer horizons. The final bucket is clipped to
 the effective horizon, including a half-hour final interval. The optimizer
@@ -259,7 +262,7 @@ you created or pass a request dict to the public API.
 - Non-preemptive scheduling; machine capacity is enforced, while machine
   availability and machine power are informational.
 - No setup/changeover times; constant power while a process runs.
-- Solar availability is shared site-wide and allocated per half-hour slot;
+- Solar availability is shared site-wide and allocated per minute slot;
   solar is not stored or exported.
 - Half-hour grid; reified slot encoding scales O(horizon × processes).
 - DEMO/SIMULATED data only — do not interpret results as real industrial

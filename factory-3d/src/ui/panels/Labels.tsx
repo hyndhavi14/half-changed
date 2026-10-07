@@ -20,13 +20,14 @@ function useLabelRef(key: string, machineId: string | null, pos?: [number, numbe
 }
 
 function MachineLabel({ id, stage }: { id: string; stage: string }) {
-  const status = useMachineStore((s) => s.machines[id]?.status);
+  const machine = useMachineStore((s) => s.machines[id]);
   const selected = useViewStore((s) => s.selectedId === id);
   const showIds = useViewStore((s) => s.showIds);
   const ref = useLabelRef(id, id);
+  if (!machine) return null;
   return (
     <div ref={ref} className={`lbl${selected ? ' on' : ''}`}>
-      <span className="dot" style={status ? { background: statusCss(status) } : undefined} />
+      <span className="dot" style={{ background: statusCss(machine.status) }} />
       <span>{stage}</span>
       {showIds && <span className="id">{id}</span>}
     </div>
@@ -38,7 +39,7 @@ function InfraLabel({ k, text, pos }: { k: string; text: string; pos: [number, n
   const ref = useLabelRef(`infra:${k}`, null, pos);
   return (
     <div ref={ref} className="lbl infra">
-      {k === 'solar' ? `${text} · ${solar} kW` : text}
+      {k === 'solar' ? `${text} · ${solar === null ? 'Not reported' : `${solar} kW`}` : text}
     </div>
   );
 }

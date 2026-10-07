@@ -55,9 +55,9 @@ export function DebugPanel() {
       </label>
       <hr />
       <label htmlFor="bm-solar" style={{ minHeight: 0 }}>
-        Solar output: <b style={{ marginLeft: 4 }}>{solar} kW</b>
+        Solar output: <b style={{ marginLeft: 4 }}>{solar === null ? 'Not reported' : `${solar} kW`}</b>
       </label>
-      <input id="bm-solar" type="range" min={0} max={120} step={1} value={solar} onChange={(e) => setSolar(+e.target.value)} />
+      <input id="bm-solar" type="range" min={0} max={120} step={1} value={solar ?? 0} onChange={(e) => setSolar(+e.target.value)} />
       <hr />
       <div>{m ? `Set status of ${m.name}:` : 'Select a machine to change its status.'}</div>
       <div className="sbtns">

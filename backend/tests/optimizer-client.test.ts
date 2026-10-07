@@ -138,6 +138,48 @@ describe('optimizer adapter — refuses to guess a partial configuration', () =>
     expect(optimizerUnavailableReason()).toMatch(/BASE_URL/)
   })
 
+  describe('optimizer adapter — explicit local Python transport', () => {
+    afterEach(() => resetEnvCache())
+
+    it('selects the Python subprocess only when enabled and its executable is configured', () => {
+      setEnv({
+        BYTEME_OPTIMIZER_ENABLED: 'true',
+        BYTEME_OPTIMIZER_TRANSPORT: 'python-subprocess',
+        BYTEME_OPTIMIZER_PYTHON_EXECUTABLE: 'C:\\Python\\python.exe',
+      })
+
+      expect(isOptimizerConfigured()).toBe(true)
+      expect(createOptimizerTransport().name).toBe('python-subprocess')
+    })
+
+    it('refuses Python mode when no interpreter is configured', () => {
+      setEnv({
+        BYTEME_OPTIMIZER_ENABLED: 'true',
+        BYTEME_OPTIMIZER_TRANSPORT: 'python-subprocess',
+      })
+
+      expect(isOptimizerConfigured()).toBe(false)
+      expect(optimizerUnavailableReason()).toMatch(/PYTHON_EXECUTABLE/)
+    })
+
+    it('reports Python configuration requirements when the local transport is unavailable', async () => {
+      setEnv({
+        BYTEME_OPTIMIZER_ENABLED: 'true',
+        BYTEME_OPTIMIZER_TRANSPORT: 'python-subprocess',
+      })
+
+      await expect(createOptimizerTransport().solve(problem)).rejects.toMatchObject({
+        details: {
+          requiredConfiguration: [
+            'BYTEME_OPTIMIZER_ENABLED=true',
+            'BYTEME_OPTIMIZER_PYTHON_EXECUTABLE',
+            'BYTEME_OPTIMIZER_PYTHON_WORKING_DIRECTORY',
+          ],
+        },
+      })
+    })
+  })
+
   it('refuses when the solve path is missing, rather than assuming /solve', () => {
     setEnv({
       BYTEME_OPTIMIZER_ENABLED: 'true',

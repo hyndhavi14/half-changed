@@ -5,7 +5,10 @@ import { DEFAULT_MESSAGES } from '../config/statusStyles';
 interface MachineState {
   machines: Record<string, MachineData>;
   loaded: boolean;
-  upsertMachines(list: MachineData[]): void;
+  error: string | null;
+  replaceMachines(list: MachineData[]): void;
+  setError(error: string | null): void;
+  reset(): void;
   /** Sets a status and the default message for it. */
   setStatus(id: string, status: MachineStatus): void;
 }
@@ -13,12 +16,17 @@ interface MachineState {
 export const useMachineStore = create<MachineState>()((set) => ({
   machines: {},
   loaded: false,
-  upsertMachines: (list) =>
-    set((s) => {
-      const machines = { ...s.machines };
-      for (const m of list) machines[m.machine_id] = { ...machines[m.machine_id], ...m };
-      return { machines, loaded: true };
-    }),
+  error: null,
+  replaceMachines: (list) => set({
+    machines: Object.fromEntries(list.map((machine) => [
+      machine.layout_id ?? machine.machine_id,
+      machine,
+    ])),
+    loaded: true,
+    error: null,
+  }),
+  setError: (error) => set({ error }),
+  reset: () => set({ machines: {}, loaded: false, error: null }),
   setStatus: (id, status) =>
     set((s) => {
       const m = s.machines[id];

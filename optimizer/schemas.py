@@ -46,14 +46,13 @@ INPUT_SCHEMA = {
                             "process_name": {"type": "string", "minLength": 1},
                             "duration_hours": {
                                 "type": "number", "exclusiveMinimum": 0,
-                                "multipleOf": 0.5,
-                                "description": "Process duration in hours; positive multiples of 0.5 on the half-hour scheduling grid.",
+                                "description": "Exact positive whole-minute duration, expressed in hours as integer_minutes / 60.",
                             },
                             "power_kw": {"type": "number", "minimum": 0,
                                 "multipleOf": 0.2,
                                 "description": "Constant power draw. Integer "
                                 "energy encoding requires 0.2 kW increments "
-                                "(0.1 kWh per half-hour). Integer scaling bound: "
+                                "(1/600 kWh per minute). Integer scaling bound: "
                                 "power_kw x tariff_per_kwh x "
                                 "duration_hours must stay <= 100000 (per "
                                 "process), else INVALID INPUT."},
@@ -141,18 +140,16 @@ INPUT_SCHEMA = {
         },
         "energy": {
             "type": "object",
-                "description": "Profiles use elapsed planning hours; key 0 covers [0, 1) from the planning origin, not a wall-clock hour. An omitted profile uses DEMO data with a warning; omitted hours in a supplied partial profile are zero with a warning. Profiles repeat every 24 hours. Currency is caller-defined, is not converted, and must be consistent within a request.",
+                    "description": "Profiles use elapsed planning hours; key 0 covers [0, 1) from the planning origin, not a wall-clock hour. An omitted profile uses DEMO data with a warning. Legacy profiles with keys 0-23 repeat every 24 hours; full-horizon profiles define every elapsed hour and do not repeat. Omitted hours in a supplied partial legacy profile are zero with a warning. Currency is caller-defined, is not converted, and must be consistent within a request.",
             "properties": {
                 "solar_profile": {
                     "type": "object",
                     "minProperties": 1,
                     "propertyNames": {
                         "type": "string",
-                        "pattern": r"^\s*0*(?:[0-9]|1[0-9]|2[0-3])\s*$",
+                        "pattern": r"^\s*0*[0-9]+\s*$",
                     },
-                    "description": "hour (0-23, int or numeric string) -> "
-                                   "available site-wide kW in 0.2 increments; "
-                                   "missing hours are 0; 24-hour profile repeats",
+                    "description": "hour (elapsed integer or numeric-string key) -> available site-wide kW in 0.2 increments. Profiles with only keys 0-23 retain cyclic behavior; full-horizon profiles must define every elapsed hour from 0 through planning_horizon_hours - 1.",
                     "additionalProperties": {
                         "type": "number", "minimum": 0, "multipleOf": 0.2,
                     },
@@ -162,11 +159,9 @@ INPUT_SCHEMA = {
                     "minProperties": 1,
                     "propertyNames": {
                         "type": "string",
-                        "pattern": r"^\s*0*(?:[0-9]|1[0-9]|2[0-3])\s*$",
+                        "pattern": r"^\s*0*[0-9]+\s*$",
                     },
-                    "description": "hour (0-23, int or numeric string) -> "
-                                   "currency/kWh in 0.001 increments; "
-                                   "missing hours are 0",
+                    "description": "hour (elapsed integer or numeric-string key) -> currency/kWh in 0.001 increments. Profiles with only keys 0-23 retain cyclic behavior; full-horizon profiles must define every elapsed hour from 0 through planning_horizon_hours - 1.",
                     "additionalProperties": {
                         "type": "number", "minimum": 0, "multipleOf": 0.001,
                     },
@@ -336,9 +331,18 @@ OUTPUT_SCHEMA = {
                         "properties": {
                             "process_id": {"type": "string"},
                             "process_name": {"type": "string"},
-                            "start_time": {"type": "number"},
-                            "end_time": {"type": "number"},
-                            "duration_hours": {"type": "number"},
+                            "start_time": {
+                                "type": "number",
+                                "description": "Elapsed hours from the planning origin; must be aligned to an exact whole minute.",
+                            },
+                            "end_time": {
+                                "type": "number",
+                                "description": "Elapsed hours from the planning origin; must be aligned to an exact whole minute.",
+                            },
+                            "duration_hours": {
+                                "type": "number",
+                                "description": "Exact process duration in hours; corresponds to a whole number of minutes.",
+                            },
                             "power_kw": {"type": "number"},
                             "is_flexible": {"type": "boolean"},
                             "machine_id": {"type": ["string", "null"]},

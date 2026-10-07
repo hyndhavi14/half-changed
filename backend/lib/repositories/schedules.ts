@@ -10,6 +10,9 @@ import {
   type ScheduleUpdate,
   type ScheduleWithEntries,
 } from '../schemas/schedules'
+import { InternalError } from '../errors'
+import { optimizationRequestRowSchema } from '../schemas/optimization'
+import type { OptimizationRequestRow } from '../schemas/optimization'
 import { applyPagination, client, notFound, throwIfError, validateRow } from './base'
 import { createScopedRepository, definedFields, jsonColumn } from './create-scoped-repository'
 import type { ListParams, ListResult } from './types'
@@ -489,6 +492,97 @@ export function computeTotals(entries: readonly TotalsEntry[]): ScheduleWithEntr
     peak_demand_kw: peak,
     duration_minutes: durationMinutes,
   }
+}
+
+export interface OptimizationScheduleWrite {
+  kind: 'baseline' | 'optimized'
+  horizon_start: string
+  horizon_end: string
+  total_energy_cost: number | null
+  total_energy_kwh: number | null
+  peak_demand_kw: number | null
+  entries: ScheduleEntryCreate[]
+}
+
+export interface PersistedOptimizationSchedule {
+  schedule: ScheduleRow
+  entries: ScheduleEntryRow[]
+  computed_totals: ScheduleWithEntries['computed_totals']
+}
+
+export interface PersistedOptimizationSchedules {
+  request: OptimizationRequestRow
+  schedules: PersistedOptimizationSchedule[]
+}
+
+/**
+ * Creates every schedule and entry for one optimizer result in one database
+ * transaction. The successful optimization result is deliberately written
+ * separately first so it remains auditable if this schedule transaction fails.
+ */
+export async function persistOptimizationSchedules(
+  factoryId: string,
+  requestId: string,
+  resultId: string,
+  adapter: string,
+  schedules: OptimizationScheduleWrite[],
+): Promise<PersistedOptimizationSchedules> {
+  const { data, error } = await client().rpc('persist_optimization_schedules', {
+    p_factory_id: factoryId,
+    p_optimization_request_id: requestId,
+    p_optimization_result_id: resultId,
+    p_adapter: adapter,
+    p_schedules: schedules.map((schedule) => ({
+      kind: schedule.kind,
+      horizon_start: schedule.horizon_start,
+      horizon_end: schedule.horizon_end,
+      total_energy_cost: schedule.total_energy_cost,
+      total_energy_kwh: schedule.total_energy_kwh,
+      peak_demand_kw: schedule.peak_demand_kw,
+      entries: schedule.entries.map((entry) => ({
+        machine_id: entry.machine_id,
+        process_id: entry.process_id,
+        production_order_id: entry.production_order_id ?? null,
+        starts_at: entry.starts_at,
+        ends_at: entry.ends_at,
+        power_kw: entry.power_kw ?? null,
+        energy_kwh: entry.energy_kwh ?? null,
+        cost: entry.cost ?? null,
+        quantity: entry.quantity ?? null,
+        sequence: entry.sequence,
+        metadata: entry.metadata ?? {},
+      })),
+    })),
+  })
+  throwIfError(error, 'persist optimizer schedules')
+
+  const response: unknown = data
+  if (
+    typeof response !== 'object' || response === null ||
+    !('schedules' in response) || !('request' in response) ||
+    !Array.isArray(response.schedules) || response.schedules.length !== schedules.length
+  ) {
+    throw new InternalError('Atomic optimizer schedule write returned an invalid response.')
+  }
+
+  const request = validateRow(optimizationRequestRowSchema, response.request, 'optimization_requests')
+  const schedulePayloads: unknown[] = response.schedules
+  const persistedSchedules = schedulePayloads.map((raw) => {
+    if (
+      typeof raw !== 'object' || raw === null || !('schedule' in raw) ||
+      !('entries' in raw) || !Array.isArray(raw.entries)
+    ) {
+      throw new InternalError('Atomic optimizer schedule write returned an invalid schedule.')
+    }
+    const schedule = validateRow(scheduleRowSchema, raw.schedule, 'schedules')
+    const entryPayloads: unknown[] = raw.entries
+    const entries = entryPayloads.map((entry) => validateRow(scheduleEntryRowSchema, entry, 'schedule_entries'))
+    if (entries.some((entry) => entry.schedule_id !== schedule.id)) {
+      throw new InternalError('Atomic optimizer schedule write returned entries for another schedule.')
+    }
+    return { schedule, entries, computed_totals: computeTotals(entries) }
+  })
+  return { request, schedules: persistedSchedules }
 }
 
 /** Entries for a machine that overlap a time window, ignoring the entry itself. */

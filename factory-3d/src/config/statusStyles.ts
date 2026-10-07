@@ -15,9 +15,10 @@ export const STATUS: Record<MachineStatus, StatusStyle> = {
   maintenance: { label: 'Maintenance', hex: STATUS_COLORS.maintenance, speed: 0 },
   warning: { label: 'Warning', hex: STATUS_COLORS.warning, speed: 0.55 },
   offline: { label: 'Offline', hex: STATUS_COLORS.offline, speed: 0 },
+  unknown: { label: 'Not reported', hex: STATUS_COLORS.offline, speed: 0 },
 };
 
-export const STATUS_ORDER: MachineStatus[] = ['running', 'idle', 'maintenance', 'warning', 'offline'];
+export const STATUS_ORDER: MachineStatus[] = ['running', 'idle', 'maintenance', 'warning', 'offline', 'unknown'];
 
 /** Message set on a machine whenever its status changes to one of these. */
 export const DEFAULT_MESSAGES: Partial<Record<MachineStatus, string>> = {
@@ -27,7 +28,7 @@ export const DEFAULT_MESSAGES: Partial<Record<MachineStatus, string>> = {
 };
 
 /** UI (2D) status colour; the CSS variables carry the theme-aware tints. */
-export const statusCss = (s: MachineStatus) => `var(--s-${s})`;
+export const statusCss = (s: MachineStatus) => `var(--s-${s === 'unknown' ? 'offline' : s})`;
 
 /** Ease rate of the speed factor: factor += (target - factor) * min(1, dt * EASE). */
 export const SPEED_EASE = 2.2;

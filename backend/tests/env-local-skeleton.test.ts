@@ -26,8 +26,8 @@ function parseEnvFile(path: string): Record<string, string> {
   return result
 }
 
-describe('.env.local skeleton', () => {
-  const envLocal = parseEnvFile('.env.local')
+describe('.env.example template', () => {
+  const envLocal = parseEnvFile('.env.example')
 
   it('contains every key lib/env.ts requires', () => {
     const schemaSource = readFileSync('lib/env.ts', 'utf8')

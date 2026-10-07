@@ -66,6 +66,7 @@ export const POST = withFactoryAccess(async (request: NextRequest, { params }: C
       return created({
         request: result.request,
         solution: null,
+        schedules: [],
         note: 'Payload built and stored. No optimizer was contacted and no solution was produced.',
       })
     }
@@ -73,6 +74,7 @@ export const POST = withFactoryAccess(async (request: NextRequest, { params }: C
     return created({
       request: result.request,
       solution: result.solution,
+      schedules: result.schedules,
     })
   } catch (error) {
     // A 503 or 502 from the adapter is a legitimate outcome of POST, not a

@@ -307,6 +307,33 @@ describe('seed transaction handling', () => {
     expect(seedSql).toMatch(/"demo"\s*:\s*true/)
     expect(seedSql).toMatch(/"demo_only"\s*:\s*true/)
   })
+
+  it('keeps the mock Chocolate durations compatible with the half-hour optimizer grid', () => {
+    expect(seedSql).toContain("'grind-nibs',        'Grind Nibs',        'DEMO. Crack and grind roasted nibs.',                60,  'roasting-drum'")
+    expect(seedSql).toContain("'mould-shell',       'Mould Shell',       'DEMO. Deposit shells in moulds.',                      60,  'moulding-line'")
+    expect(seedSql).toContain("'cool-and-demould',  'Cool And Demould',  'DEMO. Cool then demould the shells.',                  30,  'cooling-tunnel'")
+    expect(seedSql).toContain("'pack-retail',       'Pack Retail',       'DEMO. Wrap and case the product for retail.',          30,  'packing-cell'")
+  })
+
+  it('labels synthetic energy accurately and stores quarter-hour solar energy', () => {
+    expect(seedSql).toContain("then round((280 * greatest(0.0, sin(pi() * (extract(hour from t.ts at time zone 'Europe/Amsterdam') - 8) / 9.0)))::numeric * 5) / 20")
+    expect(seedSql).toMatch(/'simulated',\s*'\{"demo": true, "note": "synthetic demonstration series"\}'::jsonb/)
+    expect(seedSql).toMatch(/on conflict do update set\s+generation_kwh = excluded\.generation_kwh,\s+source = excluded\.source;/)
+    expect(seedSql).not.toMatch(/on conflict do update set[\s\S]{0,100}consumption_kwh/)
+  })
+
+  it('adjusts only the approved time-of-use tariff boundaries', () => {
+    expect(seedSql).toContain("('off-peak',  'DEMO. Off-peak (night)',        '22:00'::time, '07:00'::time")
+    expect(seedSql).toContain("('shoulder',  'DEMO. Shoulder',                 '07:00'::time, '22:00'::time")
+    expect(seedSql).toContain("('peak-sat',  'DEMO. Peak (Saturday)',          '08:00'::time, '20:00'::time")
+    expect(seedSql).toContain("('demand',    'DEMO. Monthly demand charge',    '00:00'::time, '23:59'::time")
+  })
+
+  it('preserves the existing machine availability calendars', () => {
+    expect(seedSql).toContain('"day": 6, "start": "08:00", "end": "14:00"')
+    expect(seedSql).toContain('"day": 1, "start": "06:00", "end": "22:00"')
+    expect(seedSql).toContain('"day": 1, "start": "08:00", "end": "20:00"')
+  })
 })
 
 describe('seed remains industry-neutral outside the demo rows', () => {

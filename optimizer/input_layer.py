@@ -23,13 +23,13 @@ from optimizer.models import (
     TIME_SCALE,
     dependency_topological_order,
     energy_precision_problems,
+    exact_minute_count,
     time_to_grid_ceil,
     time_to_grid_floor,
     validate_factory_config,
 )
 
-# Energy-profile validation bounds (profiles are 24-hour cyclic; horizons
-# longer than 24 h wrap via hour % 24 in the engine)
+# Legacy energy profiles contain 24 cyclic hourly values.
 HOURS_PER_DAY = 24
 
 
@@ -140,8 +140,69 @@ def _normalize_profile_hours(profile, profile_name):
     return normalized
 
 
+def _uses_full_horizon_profiles(solar_profile, tariff_profile, horizon,
+                                problems):
+    profiles = (solar_profile, tariff_profile)
+    full_horizon_modes = []
+    for profile in profiles:
+        if isinstance(profile, dict):
+            full_horizon_modes.append(any(
+                isinstance(hour, int) and not isinstance(hour, bool)
+                and hour >= HOURS_PER_DAY
+                for hour in profile
+            ))
+        else:
+            full_horizon_modes.append(False)
+
+    if full_horizon_modes[0] != full_horizon_modes[1]:
+        _add_problem(
+            problems,
+            "energy.solar_profile and energy.tariff_profile must both use "
+            "24-hour cyclic profiles or both use full-horizon profiles",
+        )
+
+    if not any(full_horizon_modes):
+        return False
+
+    if not _is_finite_number(horizon) or not float(horizon).is_integer():
+        _add_problem(
+            problems,
+            "full-horizon energy profiles require an integer-hour planning horizon",
+        )
+        return True
+
+    expected_hours = int(horizon)
+    for name, profile in zip(
+        ("solar_profile", "tariff_profile"), profiles
+    ):
+        if not isinstance(profile, dict):
+            continue
+        actual_keys = {
+            hour for hour in profile
+            if isinstance(hour, int) and not isinstance(hour, bool)
+        }
+        exact_range = (
+            len(actual_keys) == expected_hours
+            and (not actual_keys or (
+                min(actual_keys) == 0
+                and max(actual_keys) == expected_hours - 1
+            ))
+        )
+        if not exact_range:
+            _add_problem(
+                problems,
+                f"energy.{name} full-horizon keys must be exactly "
+                f"0..{expected_hours - 1}; received {len(actual_keys)} "
+                "integer hour keys",
+            )
+    return True
+
+
 def _validate_energy_profiles(solar_profile, tariff_profile, emission_factor,
-                              problems, warnings):
+                              problems, warnings, full_horizon, horizon):
+    max_hour = int(horizon) if full_horizon and _is_finite_number(horizon) \
+        and float(horizon).is_integer() else HOURS_PER_DAY
+
     # Solar profile: hours -> non-negative finite kW
     if not isinstance(solar_profile, dict) or not solar_profile:
         _add_problem(problems, "energy.solar_profile must be a non-empty dict "
@@ -149,11 +210,11 @@ def _validate_energy_profiles(solar_profile, tariff_profile, emission_factor,
     else:
         for hour, kw in solar_profile.items():
             if not isinstance(hour, int) or isinstance(hour, bool) \
-                    or not (0 <= hour < HOURS_PER_DAY):
+                    or not (0 <= hour < max_hour):
                 _add_problem(
                     problems,
                     f"energy.solar_profile has invalid hour {hour!r} "
-                    f"(must be integer 0-23)",
+                    f"(must be an integer from 0 to {max_hour - 1})",
                 )
             if not _is_finite_number(kw) or kw < 0:
                 _add_problem(
@@ -161,13 +222,23 @@ def _validate_energy_profiles(solar_profile, tariff_profile, emission_factor,
                     f"energy.solar_profile[{hour!r}] must be a finite number "
                     f">= 0 (no NaN/Infinity), got {kw!r}",
                 )
-        missing = [h for h in range(HOURS_PER_DAY) if h not in solar_profile]
+        missing = (
+            [] if full_horizon else
+            [h for h in range(max_hour) if h not in solar_profile]
+        )
         if missing:
-            _add_warning(
-                warnings,
-                "energy.solar_profile does not define hours "
-                f"{missing}; they are treated as 0 kW",
-            )
+            if full_horizon:
+                _add_problem(
+                    problems,
+                    "energy.solar_profile full-horizon values are missing "
+                    f"hours {missing[:8]}",
+                )
+            else:
+                _add_warning(
+                    warnings,
+                    "energy.solar_profile does not define hours "
+                    f"{missing}; they are treated as 0 kW",
+                )
 
     # Tariff profile: hours -> non-negative finite price per kWh
     if not isinstance(tariff_profile, dict) or not tariff_profile:
@@ -176,11 +247,11 @@ def _validate_energy_profiles(solar_profile, tariff_profile, emission_factor,
     else:
         for hour, tariff in tariff_profile.items():
             if not isinstance(hour, int) or isinstance(hour, bool) \
-                    or not (0 <= hour < HOURS_PER_DAY):
+                    or not (0 <= hour < max_hour):
                 _add_problem(
                     problems,
                     f"energy.tariff_profile has invalid hour {hour!r} "
-                    f"(must be integer 0-23)",
+                    f"(must be an integer from 0 to {max_hour - 1})",
                 )
             if not _is_finite_number(tariff) or tariff < 0:
                 _add_problem(
@@ -188,13 +259,23 @@ def _validate_energy_profiles(solar_profile, tariff_profile, emission_factor,
                     f"energy.tariff_profile[{hour!r}] must be a finite number "
                     f">= 0 (no NaN/Infinity), got {tariff!r}",
                 )
-        missing = [h for h in range(HOURS_PER_DAY) if h not in tariff_profile]
+        missing = (
+            [] if full_horizon else
+            [h for h in range(max_hour) if h not in tariff_profile]
+        )
         if missing:
-            _add_warning(
-                warnings,
-                "energy.tariff_profile does not define hours "
-                f"{missing}; they are treated as 0 currency units per kWh",
-            )
+            if full_horizon:
+                _add_problem(
+                    problems,
+                    "energy.tariff_profile full-horizon values are missing "
+                    f"hours {missing[:8]}",
+                )
+            else:
+                _add_warning(
+                    warnings,
+                    "energy.tariff_profile does not define hours "
+                    f"{missing}; they are treated as 0 currency units per kWh",
+                )
 
     # Optional emission factor: non-negative finite kg CO2 per kWh
     if emission_factor is not None:
@@ -386,11 +467,11 @@ def validate_user_input(data):
                 f"process '{pid or index}': duration_hours exceeds the "
                 "supported CP-SAT time domain",
             )
-        elif (duration * TIME_SCALE) != int(duration * TIME_SCALE):
+        elif exact_minute_count(duration) is None:
             _add_problem(
                 problems,
-                f"process '{pid or index}': duration_hours {duration} is not a "
-                f"multiple of {1 / TIME_SCALE} h (half-hour grid)",
+                f"process '{pid or index}': duration_hours {duration} does not "
+                "represent an exact whole number of minutes",
             )
 
         power = proc.get("power_kw")
@@ -568,8 +649,8 @@ def validate_user_input(data):
             f"{cyclic}",
         )
 
-    # Time-window feasibility on the half-hour grid. Lower bounds round up;
-    # upper bounds round down, matching the solver's integer ticks.
+    # Window bounds retain their existing half-hour rounding; process duration
+    # is represented exactly in integer minutes.
     for proc in processes:
         if not isinstance(proc, dict):
             continue
@@ -581,18 +662,19 @@ def validate_user_input(data):
         latest = proc.get("latest_finish")
         if (_fits_cp_sat_time_domain(earliest)
                 and _fits_cp_sat_time_domain(duration)
+                and exact_minute_count(duration) is not None
                 and _fits_cp_sat_time_domain(deadline)
                 and _fits_cp_sat_time_domain(horizon)
                 and (latest is None
                      or _fits_cp_sat_time_domain(latest))):
             finish_limit = latest if latest is not None else deadline
             if (time_to_grid_ceil(earliest)
-                    + int(round(duration * TIME_SCALE))
+                    + exact_minute_count(duration)
                     > time_to_grid_floor(finish_limit)):
                 _add_problem(
                     problems,
                     f"process '{pid}': impossible time window on the "
-                    f"half-hour grid - cannot run for {duration} h between "
+                    f"minute schedule - cannot run for {duration} h between "
                     f"earliest_start {earliest} and finish limit {finish_limit}",
                 )
 
@@ -607,8 +689,12 @@ def validate_user_input(data):
     solar_profile = _normalize_profile_hours(solar_profile, "solar_profile")
     tariff_profile = _normalize_profile_hours(tariff_profile, "tariff_profile")
 
+    full_horizon_profiles = _uses_full_horizon_profiles(
+        solar_profile, tariff_profile, horizon, problems
+    )
     _validate_energy_profiles(
-        solar_profile, tariff_profile, emission_factor, problems, warnings
+        solar_profile, tariff_profile, emission_factor, problems, warnings,
+        full_horizon_profiles, horizon,
     )
     problems.extend(energy_precision_problems(
         processes, solar_profile, tariff_profile
@@ -623,7 +709,8 @@ def validate_user_input(data):
         _add_warning(warnings,
                      "no energy.tariff_profile supplied; the DEMO/SIMULATED "
                      "tariff profile is used (not real electricity prices)")
-    if _is_finite_number(horizon) and horizon > HOURS_PER_DAY:
+    if (_is_finite_number(horizon) and horizon > HOURS_PER_DAY
+            and not full_horizon_profiles):
         days = int(math.ceil(horizon / HOURS_PER_DAY))
         _add_warning(
             warnings,
@@ -642,13 +729,13 @@ def validate_user_input(data):
         valid_tariffs = [
             v for k, v in tariff_profile.items()
             if isinstance(k, int) and not isinstance(k, bool)
-            and 0 <= k < HOURS_PER_DAY
+            and k >= 0
             and isinstance(v, (int, float)) and not isinstance(v, bool)
         ]
         valid_solar = [
             v for k, v in solar_profile.items()
             if isinstance(k, int) and not isinstance(k, bool)
-            and 0 <= k < HOURS_PER_DAY
+            and k >= 0
             and isinstance(v, (int, float)) and not isinstance(v, bool)
         ]
         max_tariff = max(valid_tariffs) if valid_tariffs else None

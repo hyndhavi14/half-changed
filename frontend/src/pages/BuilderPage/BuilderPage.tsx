@@ -4,16 +4,10 @@ import Card from '../../components/Card/Card'
 import Field from '../../components/Field/Field'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import { useFactory } from '../../context/useFactory'
+import { saveBackendFactoryBuilder } from '../../data/backendApi'
 import type {
-  CompareMetric,
   EnergyTariff,
-  Factory,
-  FactoryKpi,
-  HourEnergy,
-  Machine,
   MachineType,
-  ScheduleBlock,
-  Stage,
 } from '../../data/types'
 import { Link } from 'react-router-dom'
 import styles from './BuilderPage.module.css'
@@ -46,17 +40,9 @@ const MACHINE_TYPES: MachineType[] = [
   'generic',
 ]
 
-const SCHEDULE_COLORS: ScheduleBlock['colorKey'][] = [
-  'roast',
-  'grind',
-  'conche',
-  'temper',
-  'mould',
-  'pack',
-]
-
 interface MachineDraft {
   id: string
+  slug?: string
   name: string
   power: string
   type: MachineType
@@ -66,14 +52,17 @@ interface MachineDraft {
 
 interface ProcessDraft {
   id: string
+  slug?: string
   name: string
   machineId: string
   duration: string
+  isActive: boolean
 }
 
 interface BuilderForm {
   name: string
   industry: string
+  currency: string
   workingHours: string
   solarCapacity: string
   peakTariff: string
@@ -85,6 +74,7 @@ interface BuilderForm {
 const INITIAL_FORM: BuilderForm = {
   name: '',
   industry: INDUSTRIES[0],
+  currency: 'INR',
   workingHours: '8',
   solarCapacity: '40',
   peakTariff: '12',
@@ -94,7 +84,7 @@ const INITIAL_FORM: BuilderForm = {
     { id: 'machine-2', name: 'Heating tank', power: '25', type: 'tank', available: true, editing: false },
   ],
   processes: [
-    { id: 'process-1', name: 'Mixing', machineId: 'machine-1', duration: '40' },
+    { id: 'process-1', name: 'Mixing', machineId: 'machine-1', duration: '40', isActive: true },
   ],
 }
 
@@ -129,161 +119,6 @@ const ARROW_ICON = (
   </svg>
 )
 
-function createEnergy(hours: HourEnergy[], solarCapacity: number): HourEnergy[] {
-  const solarProfile = hours.map((hour) => hour.solarKwh)
-  const maxSolar = Math.max(...solarProfile, 1)
-  return hours.map((hour, index) => ({
-    hour: index,
-    solarKwh: Math.round((solarProfile[index] / maxSolar) * solarCapacity * 0.75),
-    gridKwh: Math.max(4, Math.round(hour.gridKwh * 0.7)),
-    tariff:
-      index >= 18 && index <= 21
-        ? 'peak'
-        : index >= 6 && index <= 9
-          ? 'mid'
-          : 'off',
-  }))
-}
-
-function createFactory(form: BuilderForm, sampleFactory: Factory): Factory {
-  const availableMachines = form.machines.filter((machine) => machine.available)
-  const machineById = new Map(form.machines.map((machine) => [machine.id, machine]))
-  const stages: Stage[] = form.processes.map((process) => {
-    const draft = machineById.get(process.machineId)
-    const machine: Machine = {
-      id: process.machineId,
-      name: draft?.name || 'Machine',
-      type: draft?.type ?? 'generic',
-      ratedKw: Number(draft?.power) || 0,
-      status: draft?.available ? 'Running' : 'Maintenance',
-      utilization: draft?.available ? 75 : 0,
-      currentJob: process.name,
-      onSolar: true,
-    }
-    return {
-      id: process.id,
-      name: process.name,
-      machines: [machine],
-    }
-  })
-  const workingHours = Number(form.workingHours)
-  const solarCapacityKw = Number(form.solarCapacity)
-  const peakTariff = Number(form.peakTariff)
-  const offPeakTariff = Number(form.offPeakTariff)
-  const totalPower = availableMachines.reduce(
-    (total, machine) => total + (Number(machine.power) || 0),
-    0,
-  )
-  const totalMinutes = form.processes.reduce(
-    (total, process) => total + (Number(process.duration) || 0),
-    0,
-  )
-  const baselineGridKwh = Math.round(totalPower * Math.max(workingHours, 1) * 0.65)
-  const optimizedGridKwh = Math.round(baselineGridKwh * 0.72)
-  const baselineCost = Math.round(
-    baselineGridKwh * ((peakTariff + offPeakTariff) / 2),
-  )
-  const optimizedCost = Math.round(baselineCost * 0.78)
-  const peakDemand = Math.round(totalPower * 0.8)
-  const optimizedPeak = Math.round(peakDemand * 0.75)
-  const makespan = Math.max(1, Math.round((totalMinutes / 60) * 10) / 10)
-  const optimizedMakespan = Math.max(1, Math.round(makespan * 0.92 * 10) / 10)
-  const energyByHour = createEnergy(sampleFactory.energyByHour, solarCapacityKw)
-
-  const baselineSchedule: ScheduleBlock[] = form.processes.map((process, index) => {
-    const start = (6 + index * 2) % 24
-    const duration = Math.max(0.5, (Number(process.duration) || 30) / 60)
-    return {
-      id: `${process.id}-baseline`,
-      processName: process.name,
-      machineId: process.machineId,
-      start,
-      end: Math.min(24, start + duration),
-      colorKey: SCHEDULE_COLORS[index % SCHEDULE_COLORS.length],
-      shifted: false,
-    }
-  })
-  const optimizedSchedule: ScheduleBlock[] = form.processes.map((process, index) => {
-    const start = (10 + index * 2) % 24
-    const duration = Math.max(0.5, (Number(process.duration) || 30) / 60)
-    return {
-      id: `${process.id}-optimized`,
-      processName: process.name,
-      machineId: process.machineId,
-      start,
-      end: Math.min(24, start + duration),
-      colorKey: SCHEDULE_COLORS[index % SCHEDULE_COLORS.length],
-      shifted: start !== baselineSchedule[index].start,
-    }
-  })
-
-  const compare: CompareMetric[] = [
-    {
-      label: 'Energy cost',
-      baseline: `₹ ${baselineCost.toLocaleString('en-IN')}`,
-      optimized: `₹ ${optimizedCost.toLocaleString('en-IN')}`,
-      baselinePct: 100,
-      optimizedPct: 78,
-      change: '−22%',
-    },
-    {
-      label: 'Grid energy',
-      baseline: `${baselineGridKwh.toLocaleString('en-IN')} kWh`,
-      optimized: `${optimizedGridKwh.toLocaleString('en-IN')} kWh`,
-      baselinePct: 100,
-      optimizedPct: 72,
-      change: '−28%',
-    },
-    {
-      label: 'Peak demand',
-      baseline: `${peakDemand} kW`,
-      optimized: `${optimizedPeak} kW`,
-      baselinePct: 100,
-      optimizedPct: 75,
-      change: '−25%',
-    },
-    {
-      label: 'Makespan',
-      baseline: `${makespan} h`,
-      optimized: `${optimizedMakespan} h`,
-      baselinePct: 100,
-      optimizedPct: 92,
-      change: '−8%',
-    },
-  ]
-  const solarShare = solarCapacityKw > 0 ? Math.min(75, Math.round((solarCapacityKw / (solarCapacityKw + totalPower)) * 100)) : 0
-  const kpis: FactoryKpi[] = [
-    { label: 'Energy cost saved', value: `₹ ${(baselineCost - optimizedCost).toLocaleString('en-IN')}`, delta: '−22%', note: 'vs baseline', dotColor: 'var(--teal)' },
-    { label: 'Makespan', value: `${optimizedMakespan} h`, delta: `−${Math.max(0, makespan - optimizedMakespan).toFixed(1)} h`, note: `from ${makespan} h`, dotColor: 'var(--caramel)' },
-    { label: 'Solar share', value: `${solarShare}%`, delta: '+10 pts', note: 'vs baseline', dotColor: 'var(--sun)' },
-    { label: 'Machine utilization', value: '75%', delta: '+8 pts', note: 'vs baseline', dotColor: 'var(--plum)' },
-  ]
-
-  return {
-    id: `custom-${crypto.randomUUID()}`,
-    name: form.name.trim(),
-    has3dModel: false,
-    solarCapacityKw,
-    solarNowKw: Math.round(solarCapacityKw * 0.7),
-    gridNowKw: Math.round(totalPower * 0.6),
-    gridMaxKw: totalPower,
-    stages,
-    kpis,
-    energyByHour,
-    compare,
-    baselineSchedule,
-    optimizedSchedule,
-    shifted: form.processes.map((process, index) => ({
-      process: process.name,
-      machine: machineById.get(process.machineId)?.name ?? 'Machine',
-      was: `${String(6 + index * 2).padStart(2, '0')}:00`,
-      now: `${String(10 + index * 2).padStart(2, '0')}:00`,
-      reason: 'Use solar',
-      saved: `₹ ${Math.round((baselineCost - optimizedCost) / Math.max(1, form.processes.length)).toLocaleString('en-IN')}`,
-    })),
-  }
-}
-
 function formatAvailability(available: boolean) {
   return available ? 'Available' : 'Unavailable'
 }
@@ -294,6 +129,7 @@ function isBuilderForm(value: unknown): value is BuilderForm {
   return (
     typeof candidate.name === 'string' &&
     typeof candidate.industry === 'string' &&
+    typeof candidate.currency === 'string' &&
     typeof candidate.workingHours === 'string' &&
     typeof candidate.solarCapacity === 'string' &&
     typeof candidate.peakTariff === 'string' &&
@@ -302,6 +138,7 @@ function isBuilderForm(value: unknown): value is BuilderForm {
     candidate.machines.every(
       (machine) =>
         typeof machine.id === 'string' &&
+        (machine.slug === undefined || typeof machine.slug === 'string') &&
         typeof machine.name === 'string' &&
         typeof machine.power === 'string' &&
         MACHINE_TYPES.includes(machine.type) &&
@@ -312,9 +149,11 @@ function isBuilderForm(value: unknown): value is BuilderForm {
     candidate.processes.every(
       (process) =>
         typeof process.id === 'string' &&
+        (process.slug === undefined || typeof process.slug === 'string') &&
         typeof process.name === 'string' &&
         typeof process.machineId === 'string' &&
-        typeof process.duration === 'string',
+        typeof process.duration === 'string' &&
+        typeof process.isActive === 'boolean',
     )
   )
 }
@@ -349,13 +188,89 @@ function loadSavedDraft(): {
   }
 }
 
+function numberOr(value: unknown, fallback: string): string {
+  const parsed = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN
+  return Number.isFinite(parsed) ? String(parsed) : fallback
+}
+
+function uniqueSlug(value: string, fallback: string, used: Set<string>): string {
+  const base = (value.toLowerCase().trim().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || fallback)
+    .slice(0, 63)
+    .replace(/-+$/g, '')
+  const safeBase = base.length >= 2 ? base : `${base || 'item'}-1`
+  let candidate = safeBase
+  let suffix = 2
+  while (used.has(candidate)) {
+    const ending = `-${suffix++}`
+    candidate = `${safeBase.slice(0, 63 - ending.length)}${ending}`
+  }
+  used.add(candidate)
+  return candidate
+}
+
 export default function BuilderPage() {
-  const { factory, addFactory } = useFactory()
+  const { backendData, loading, error, reloadFactories, setFactoryId } = useFactory()
   const [step, setStep] = useState(0)
   const [initialDraft] = useState(loadSavedDraft)
   const [form, setForm] = useState<BuilderForm>(initialDraft.form)
   const [message, setMessage] = useState(initialDraft.message)
   const [messageIsError, setMessageIsError] = useState(initialDraft.messageIsError)
+  const [factoryIdToEdit, setFactoryIdToEdit] = useState<string | null>(null)
+  const [factorySlugToEdit, setFactorySlugToEdit] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  const startNewFactory = () => {
+    setFactoryIdToEdit(null)
+    setFactorySlugToEdit(null)
+    setForm({ ...INITIAL_FORM, machines: INITIAL_FORM.machines.map((item) => ({ ...item })), processes: INITIAL_FORM.processes.map((item) => ({ ...item })) })
+    setStep(0)
+    setMessage('')
+    setMessageIsError(false)
+  }
+
+  const loadSelectedFactory = () => {
+    if (!backendData) return
+    const storedBuilder = backendData.factory.config.builder
+    const builderConfig = typeof storedBuilder === 'object' && storedBuilder !== null && !Array.isArray(storedBuilder)
+      ? storedBuilder as Record<string, unknown>
+      : {}
+    const peak = backendData.tariffs.find((tariff) => tariff.slug === 'builder-peak')
+    const offPeak = backendData.tariffs.find((tariff) => tariff.slug === 'builder-off-peak-early')
+    const tariffRate = (tariff: Record<string, unknown> | undefined) =>
+      tariff ? numberOr(tariff.energy_price_per_kwh, '') : ''
+    setForm({
+      name: backendData.factory.name,
+      industry: backendData.factory.description ??
+        (typeof builderConfig.industry === 'string' ? builderConfig.industry : INDUSTRIES[0]),
+      currency: backendData.factory.currency,
+      workingHours: numberOr(builderConfig.working_hours_per_day, '8'),
+      solarCapacity: numberOr(builderConfig.solar_capacity_kw, '0'),
+      peakTariff: tariffRate(peak) || '0',
+      offPeakTariff: tariffRate(offPeak) || '0',
+      machines: backendData.machines.map((machine) => ({
+        id: machine.id,
+        slug: machine.slug,
+        name: machine.name,
+        power: numberOr(machine.ratedPowerKw, '0'),
+        type: MACHINE_TYPES.includes(machine.type as MachineType) ? machine.type as MachineType : 'generic',
+        available: machine.isActive,
+        editing: false,
+      })),
+      processes: backendData.processes.map((process) => ({
+        id: process.id,
+        slug: process.slug,
+        name: process.name,
+        machineId: process.machineId,
+        duration: numberOr(process.durationMinutes, '1'),
+        isActive: process.isActive,
+      })),
+    })
+    setFactoryIdToEdit(backendData.factory.id)
+    setFactorySlugToEdit(backendData.factory.slug)
+    setStep(0)
+    setMessage(`Editing persisted factory ${backendData.factory.name}.`)
+    setMessageIsError(false)
+  }
 
   const updateForm = <K extends keyof BuilderForm>(key: K, value: BuilderForm[K]) => {
     setForm((current) => ({ ...current, [key]: value }))
@@ -389,6 +304,7 @@ export default function BuilderPage() {
         name: `Step ${index}`,
         machineId: availableMachine?.id ?? '',
         duration: '30',
+        isActive: true,
       },
     ])
   }
@@ -428,7 +344,7 @@ export default function BuilderPage() {
     }
   }
 
-  const saveFactory = () => {
+  const saveFactory = async () => {
     const availableMachines = form.machines.filter((machine) => machine.available)
     if (!form.name.trim()) {
       setStep(0)
@@ -448,17 +364,67 @@ export default function BuilderPage() {
       setMessageIsError(true)
       return
     }
-    if (form.processes.some((process) => !availableMachines.some((machine) => machine.id === process.machineId))) {
+    if (form.processes.some((process) =>
+      process.isActive && !availableMachines.some((machine) => machine.id === process.machineId),
+    )) {
       setStep(2)
       setMessage('Assign every process to an available machine before saving.')
       setMessageIsError(true)
       return
     }
 
-    const newFactory = createFactory(form, factory)
-    addFactory(newFactory)
-    setMessage(`${newFactory.name} was saved and added to the factory selector.`)
+    const usedMachineSlugs = new Set<string>()
+    const machineSlugs = new Map<string, string>()
+    const machines = form.machines
+    for (const [index, machine] of machines.entries()) {
+      machineSlugs.set(machine.id, uniqueSlug(machine.slug ?? machine.name, `machine-${index + 1}`, usedMachineSlugs))
+    }
+    const usedProcessSlugs = new Set<string>()
+    const processes = form.processes.map((process, index) => ({
+      slug: uniqueSlug(process.slug ?? process.name, `process-${index + 1}`, usedProcessSlugs),
+      name: process.name.trim(),
+      machine_slug: machineSlugs.get(process.machineId) ?? '',
+      duration_minutes: Number(process.duration),
+      is_active: process.isActive,
+    }))
+    const currency = form.currency.trim().toUpperCase()
+    const factorySlug = factorySlugToEdit ?? uniqueSlug(form.name, 'factory', new Set())
+    setSaving(true)
+    setMessage('')
     setMessageIsError(false)
+    try {
+      const savedFactoryId = await saveBackendFactoryBuilder({
+        factory_id: factoryIdToEdit,
+        factory: {
+          slug: factorySlug,
+          name: form.name.trim(),
+          industry: form.industry.trim(),
+          currency,
+          working_hours_per_day: Number(form.workingHours),
+          solar_capacity_kw: Number(form.solarCapacity),
+          peak_tariff: Number(form.peakTariff),
+          off_peak_tariff: Number(form.offPeakTariff),
+        },
+        machines: machines.map((machine, index) => ({
+          slug: machineSlugs.get(machine.id) ?? `machine-${index + 1}`,
+          name: machine.name.trim(),
+          type: machine.type,
+          rated_power_kw: Number(machine.power),
+          is_active: machine.available,
+        })),
+        processes,
+      })
+      window.localStorage.removeItem('byteme-factory-builder-draft')
+      setFactoryIdToEdit(savedFactoryId)
+      setMessage(factoryIdToEdit ? 'Factory changes were saved to the Backend database.' : 'Factory and manufacturing model were saved to the Backend database.')
+      await reloadFactories()
+      setFactoryId(savedFactoryId)
+    } catch (failure) {
+      setMessage(failure instanceof Error ? `Factory was not saved: ${failure.message}` : 'Factory was not saved because the Backend request failed.')
+      setMessageIsError(true)
+    } finally {
+      setSaving(false)
+    }
   }
 
   const renderDetails = () => (
@@ -483,6 +449,17 @@ export default function BuilderPage() {
             {INDUSTRIES.map((industry) => <option key={industry}>{industry}</option>)}
           </select>
         </Field>
+          <Field id="builder-currency" label="Currency (ISO 4217)">
+            <input
+              id="builder-currency"
+              type="text"
+              minLength={3}
+              maxLength={3}
+              value={form.currency}
+              onChange={(event) => updateForm('currency', event.currentTarget.value.toUpperCase())}
+              required
+            />
+          </Field>
         <div className={styles.fieldGrid}>
           <Field id="builder-hours" label="Working hours / day">
             <input id="builder-hours" type="number" min="1" max="24" value={form.workingHours} onChange={(event) => updateForm('workingHours', event.currentTarget.value)} />
@@ -490,10 +467,10 @@ export default function BuilderPage() {
           <Field id="builder-solar" label="Solar capacity (kW)">
             <input id="builder-solar" type="number" min="0" value={form.solarCapacity} onChange={(event) => updateForm('solarCapacity', event.currentTarget.value)} />
           </Field>
-          <Field id="builder-peak-tariff" label="Peak tariff (₹ /kWh)">
+          <Field id="builder-peak-tariff" label={`Peak tariff (${form.currency} /kWh)`}>
             <input id="builder-peak-tariff" type="number" min="0" step="0.1" value={form.peakTariff} onChange={(event) => updateForm('peakTariff', event.currentTarget.value)} />
           </Field>
-          <Field id="builder-offpeak-tariff" label="Off-peak tariff (₹ /kWh)">
+          <Field id="builder-offpeak-tariff" label={`Off-peak tariff (${form.currency} /kWh)`}>
             <input id="builder-offpeak-tariff" type="number" min="0" step="0.1" value={form.offPeakTariff} onChange={(event) => updateForm('offPeakTariff', event.currentTarget.value)} />
           </Field>
         </div>
@@ -637,6 +614,15 @@ export default function BuilderPage() {
                     />
                     <span>min</span>
                   </label>
+                  <label>
+                    <input
+                      aria-label={`Step ${index + 1} active`}
+                      type="checkbox"
+                      checked={process.isActive}
+                      onChange={(event) => updateProcess(process.id, { isActive: event.currentTarget.checked })}
+                    />
+                    Active
+                  </label>
                 </div>
                 <div className={styles.processActions}>
                   <Button variant="secondary" aria-label={`Move ${process.name} up`} disabled={index === 0} onClick={() => moveProcess(index, -1)}>↑</Button>
@@ -666,17 +652,16 @@ export default function BuilderPage() {
       <div className={styles.energySummary}>
         <div><span>Working hours / day</span><strong>{form.workingHours} h</strong></div>
         <div><span>Solar capacity</span><strong>{form.solarCapacity} kW</strong></div>
-        <div><span>Peak tariff</span><strong>₹ {form.peakTariff} /kWh</strong></div>
-        <div><span>Off-peak tariff</span><strong>₹ {form.offPeakTariff} /kWh</strong></div>
+        <div><span>Peak tariff</span><strong>{form.currency} {form.peakTariff} /kWh</strong></div>
+        <div><span>Off-peak tariff</span><strong>{form.currency} {form.offPeakTariff} /kWh</strong></div>
       </div>
       <div className={styles.energyBands} aria-label="Daily tariff band preview">
         {Array.from({ length: 24 }, (_, hour) => {
-          const tariff: EnergyTariff =
-            hour >= 18 && hour <= 21 ? 'peak' : hour >= 6 && hour <= 9 ? 'mid' : 'off'
+          const tariff: EnergyTariff = hour >= 18 && hour < 22 ? 'peak' : 'off'
           return <span key={hour} className={styles[`tariff-${tariff}`]} title={`${String(hour).padStart(2, '0')}:00 · ${tariff}`} />
         })}
       </div>
-      <p className={styles.energyCaption}>Off-peak · Mid tariff · Peak tariff</p>
+      <p className={styles.energyCaption}>Off-peak · Peak tariff</p>
     </Card>
   )
 
@@ -687,8 +672,8 @@ export default function BuilderPage() {
         <div><dt>Industry</dt><dd>{form.industry}</dd></div>
         <div><dt>Working hours / day</dt><dd>{form.workingHours} h</dd></div>
         <div><dt>Solar capacity</dt><dd>{form.solarCapacity} kW</dd></div>
-        <div><dt>Peak tariff</dt><dd>₹ {form.peakTariff} /kWh</dd></div>
-        <div><dt>Off-peak tariff</dt><dd>₹ {form.offPeakTariff} /kWh</dd></div>
+        <div><dt>Peak tariff</dt><dd>{form.currency} {form.peakTariff} /kWh</dd></div>
+        <div><dt>Off-peak tariff</dt><dd>{form.currency} {form.offPeakTariff} /kWh</dd></div>
         <div><dt>Available machines</dt><dd>{form.machines.filter((machine) => machine.available).length}</dd></div>
         <div><dt>Process steps</dt><dd>{form.processes.length}</dd></div>
       </dl>
@@ -725,7 +710,17 @@ export default function BuilderPage() {
 
   return (
     <div className={styles.builderPage}>
-      <PageHeader eyebrow="New custom factory" title="Factory builder" />
+      <PageHeader
+        eyebrow={backendData ? `Selected persisted factory: ${backendData.factory.name}` : loading ? 'Loading persisted factory data' : 'Factory data unavailable'}
+        title="Factory builder"
+        actions={<>
+          <Button variant="secondary" onClick={startNewFactory}>New factory</Button>
+          {backendData && (
+            <Button variant="secondary" onClick={loadSelectedFactory}>Edit selected factory</Button>
+          )}
+        </>}
+      />
+      {!backendData && !loading && error && <p role="alert">{error}</p>}
 
       <ol className={styles.stepper} aria-label="Factory builder steps">
         {STEPS.map((label, index) => {
@@ -761,7 +756,7 @@ export default function BuilderPage() {
       <footer className={styles.footer}>
         <Link className={styles.backLink} to="/">← Back to dashboard</Link>
         <div className={styles.footerActions}>
-          <Button variant="secondary" onClick={saveDraft}>Save draft</Button>
+          <Button variant="secondary" onClick={saveDraft} disabled={saving}>Save draft</Button>
           {step < STEPS.length - 1 ? (
             <Button
               variant="primary"
@@ -775,7 +770,7 @@ export default function BuilderPage() {
                 : `Next: ${STEPS[step + 1]} →`}
             </Button>
           ) : (
-            <Button variant="primary" onClick={saveFactory}>Save factory</Button>
+            <Button variant="primary" onClick={() => void saveFactory()} isLoading={saving}>Save factory</Button>
           )}
         </div>
       </footer>

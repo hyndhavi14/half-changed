@@ -1,5 +1,6 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import Logo from '../components/Logo/Logo'
+import Factory3DLauncher from '../components/Factory3DLauncher/Factory3DLauncher'
 import { useFactory } from '../context/useFactory'
 import styles from './Sidebar.module.css'
 
@@ -11,10 +12,12 @@ const NAV_ITEMS = [
   { to: '/compare', label: 'Baseline vs Optimized', number: 5 },
   { to: '/builder', label: 'Factory Builder', number: 6 },
   { to: '/factory-view', label: 'Factory View (2D / 3D)', number: 7 },
+  { to: '/solarshift-historical', label: 'SolarShift Historical Replay', number: 8 },
 ]
 
 export default function Sidebar() {
-  const { factory, factories, setFactoryId } = useFactory()
+  const { factories, selectedFactoryId, setFactoryId } = useFactory()
+  const isHistoricalReplay = useLocation().pathname === '/solarshift-historical'
 
   return (
     <nav aria-label="Main" className={styles.sidebar}>
@@ -29,7 +32,7 @@ export default function Sidebar() {
         <select
           id="factory-select"
           className={styles.select}
-          value={factory.id}
+          value={selectedFactoryId}
           onChange={(event) => setFactoryId(event.currentTarget.value)}
         >
           {factories.map((item) => (
@@ -72,6 +75,8 @@ export default function Sidebar() {
         <strong className={styles.optimizerTitle}>Optimizer ready</strong>
         <span>Last run: today, 09:40</span>
       </div>
+
+      {!isHistoricalReplay && <Factory3DLauncher />}
     </nav>
   )
 }

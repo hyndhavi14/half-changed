@@ -617,6 +617,31 @@ Both datasets are **idempotent** (upserts on natural keys) and **safe to
 delete**. Neither seeds schedules or optimization results: those must come from
 a real optimizer.
 
+### SolarShift historical replay
+
+The separate SolarShift replay importer creates factory-scoped HGD and LGD
+scenarios from the Backend Chocolate seed and persists their NASA-derived
+modeled generation, APERC kVAh windows, CP-SAT requests/results, and baseline
+and optimized schedules in Supabase. It does not alter the existing demo
+factory or enter the generic optimizer path.
+
+Run the read-only verification first, then import only when ready to write to
+the configured Supabase project:
+
+```bash
+npm run import:solarshift-historical -- --dry-run
+npm run import:solarshift-historical
+```
+
+The script validates both approved 168-hour NASA POWER windows and their
+approved totals before writing. It applies migration `0006` transactionally,
+uses the `SUPABASE_DB_URL` in the backend `.env.local`, and requires the
+repository `.venv` Python interpreter with OR-Tools installed. Scenario PV
+capacity (300 kWp), performance ratio (0.80), regional point, timestamp
+convention, and power factor (0.95) are explicit assumptions; modeled tariff
+energy cost excludes APERC demand charges and minimum-billing rules and is not
+a complete electricity bill.
+
 `tests/schedule-totals.test.ts` enforces that no industry vocabulary appears
 anywhere under `app/` or `lib/`, and that the migration file mentions no
 industry at all.

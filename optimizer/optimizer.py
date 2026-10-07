@@ -29,24 +29,29 @@ forecasting).
 Version capabilities preserved:
 - V1: baseline scheduling (minimize makespan)
 - V2: solar-aware demand shifting (maximize ALLOCATED solar under the
-  SHARED half-hour-slot solar pool, makespan as tiebreaker)
+  SHARED per-minute solar pool, makespan as tiebreaker)
 - V3: solar + tariff cost optimization (minimize grid electricity cost
-  under the SHARED half-hour-slot solar pool, makespan as tiebreaker;
+  under the SHARED per-minute solar pool, makespan as tiebreaker;
   non-flexible processes pinned to their baseline start times)
 - V4: all of the above, for ANY factory configuration, with machine/resource
   no-overlap constraints, optional process time windows, and configuration
   validation.
 """
 
+import time
+
 from ortools.sat.python import cp_model
 
 from optimizer.energy_data import DEMO_SOLAR_PROFILE, DEMO_TARIFF_PROFILE
 from optimizer.models import (
+    COST_SCALE,
     SOLAR_SCALE,
     FactoryConfig,
     FactoryConfigError,
     TIME_SCALE,
+    energy_profile_value,
     energy_precision_problems,
+    schedule_time_to_minute_count,
     time_to_grid_ceil,
     time_to_grid_floor,
 )
@@ -130,8 +135,8 @@ def get_solar_availability(hour, solar_profile=None):
     """
     Get solar availability for a specific hour.
 
-    Profiles are 24-hour cyclic: hours beyond 24 (multi-day horizons) wrap
-    with hour % 24, so day-2 hour 25 uses the day-1 hour-1 value.
+    Full-horizon profiles use exact elapsed-hour values. Legacy profiles
+    containing only hours 0-23 remain cyclic.
 
     Args:
         hour: Hour offset from schedule start (>= 0)
@@ -141,15 +146,15 @@ def get_solar_availability(hour, solar_profile=None):
         Solar power availability in kW
     """
     profile = DEMO_SOLAR_PROFILE if solar_profile is None else solar_profile
-    return profile.get(hour % 24, 0)
+    return energy_profile_value(profile, hour)
 
 
 def get_tariff(hour, tariff_profile=None):
     """
     Get the electricity tariff for a specific hour.
 
-    Profiles are 24-hour cyclic: hours beyond 24 (multi-day horizons) wrap
-    with hour % 24.
+    Full-horizon profiles use exact elapsed-hour values. Legacy profiles
+    containing only hours 0-23 remain cyclic.
 
     Args:
         hour: Hour offset from schedule start (>= 0)
@@ -160,7 +165,7 @@ def get_tariff(hour, tariff_profile=None):
         Tariff in currency units per kWh
     """
     profile = DEMO_TARIFF_PROFILE if tariff_profile is None else tariff_profile
-    return profile.get(hour % 24, 0)
+    return energy_profile_value(profile, hour)
 
 
 def calculate_solar_energy(process_start, process_end, process_power,
@@ -282,7 +287,7 @@ def _calculate_start_domains(config):
     process_order = [process.process_id for process in config.processes]
     processes = {process.process_id: process for process in config.processes}
     durations = {
-        process_id: int(round(processes[process_id].duration_hours * TIME_SCALE))
+        process_id: processes[process_id].duration_minutes
         for process_id in process_order
     }
     earliest = {
@@ -346,7 +351,7 @@ def _build_base_model(config, prune_domains=True):
     """
     model = cp_model.CpModel()
 
-    # OR-Tools CP-SAT requires integer values; TIME_SCALE units = 0.5 hours
+    # OR-Tools CP-SAT uses exact integer-minute time units.
     planning_horizon = time_to_grid_floor(config.planning_horizon_hours)
     production_deadline = time_to_grid_floor(config.production_deadline)
     start_domains = _calculate_start_domains(config)
@@ -357,7 +362,7 @@ def _build_base_model(config, prune_domains=True):
 
     for process in config.processes:
         process_id = process.process_id
-        duration = int(process.duration_hours * TIME_SCALE)
+        duration = process.duration_minutes
         lower_start, upper_start = start_domains[process_id]
 
         if prune_domains and lower_start <= upper_start:
@@ -414,7 +419,7 @@ def _build_base_model(config, prune_domains=True):
             intervals = [
                 model.NewIntervalVar(
                     start_times[pid],
-                    int(config.get_process(pid).duration_hours * TIME_SCALE),
+                    config.get_process(pid).duration_minutes,
                     end_times[pid],
                     f"interval_{machine_id}_{pid}",
                 )
@@ -450,14 +455,13 @@ def _pin_non_flexible_processes(config, model, start_times,
     if baseline is None:
         return None
     baseline_start_units = {
-        p["process_id"]: int(round(p["start_time"] * TIME_SCALE))
+        p["process_id"]: schedule_time_to_minute_count(p["start_time"])
         for p in baseline["processes"]
     }
-    fixed_start_units = {
-        process.process_id: baseline_start_units[process.process_id]
-        for process in config.processes
-        if not process.is_flexible
-    }
+    if any(value is None for value in baseline_start_units.values()):
+        raise FactoryConfigError(
+            "baseline schedule contains a non-minute-aligned start time"
+        )
     for process in config.processes:
         if not process.is_flexible:
             model.Add(
@@ -465,6 +469,278 @@ def _pin_non_flexible_processes(config, model, start_times,
                 == baseline_start_units[process.process_id]
             )
     return baseline
+
+
+def _serial_chain_order(config):
+    """Return the total precedence order, or None if any pair is incomparable."""
+    process_ids = [process.process_id for process in config.processes]
+    dependencies = {
+        process.process_id: set(process.dependencies)
+        for process in config.processes
+    }
+    remaining = {process_id: set(dependencies[process_id])
+                 for process_id in process_ids}
+    order = []
+    while len(order) < len(process_ids):
+        ready = [
+            process_id for process_id in process_ids
+            if process_id not in order and not remaining[process_id]
+        ]
+        if len(ready) != 1:
+            return None
+        process_id = ready[0]
+        order.append(process_id)
+        for other in process_ids:
+            remaining[other].discard(process_id)
+
+    ancestors = {}
+    for process_id in order:
+        ancestors[process_id] = set(dependencies[process_id])
+        for dependency in dependencies[process_id]:
+            ancestors[process_id].update(ancestors[dependency])
+    for index, process_id in enumerate(order):
+        if any(previous not in ancestors[process_id]
+               for previous in order[:index]):
+            return None
+
+    for process in config.processes:
+        if process.machine_id is None:
+            continue
+        if process.capacity_units > config.get_machine(
+                process.machine_id).capacity:
+            return None
+    return order
+
+
+def _serial_process_cost_by_phase(process, solar_profile, tariff_profile):
+    """Return exact integer cost units for each of the 1,440 daily start phases."""
+    period = 24 * TIME_SCALE
+    demand_units = int(process.power_kw * (SOLAR_SCALE // TIME_SCALE))
+    minute_costs = []
+    for minute in range(period):
+        hour = minute // TIME_SCALE
+        solar_kw = get_solar_availability(hour, solar_profile)
+        pool_units = max(
+            int(solar_kw * (SOLAR_SCALE // TIME_SCALE)), 0
+        )
+        process_cap_units = int(
+            min(solar_kw, process.power_kw)
+            * (SOLAR_SCALE // TIME_SCALE)
+        )
+        grid_units = demand_units - min(pool_units, process_cap_units)
+        tariff_units = int(round(
+            get_tariff(hour, tariff_profile) * COST_SCALE
+        ))
+        minute_costs.append(tariff_units * grid_units)
+
+    duration = process.duration_minutes
+    daily_cost = sum(minute_costs)
+    whole_days, remainder = divmod(duration, period)
+    doubled = minute_costs + minute_costs
+    prefix = [0]
+    for cost in doubled:
+        prefix.append(prefix[-1] + cost)
+    return [
+        whole_days * daily_cost + prefix[phase + remainder] - prefix[phase]
+        for phase in range(period)
+    ]
+
+
+def _serial_process_cost_by_start(
+    process,
+    solar_profile,
+    tariff_profile,
+    maximum_start,
+    check_time_limit,
+):
+    """Return exact full-horizon integer costs for every legal start minute."""
+    demand_units = int(process.power_kw * (SOLAR_SCALE // TIME_SCALE))
+    minute_costs = []
+    final_minute = maximum_start + process.duration_minutes
+    for minute in range(final_minute):
+        if minute & 4095 == 0:
+            check_time_limit()
+        hour = minute // TIME_SCALE
+        solar_kw = get_solar_availability(hour, solar_profile)
+        pool_units = max(
+            int(solar_kw * (SOLAR_SCALE // TIME_SCALE)), 0
+        )
+        process_cap_units = int(
+            min(solar_kw, process.power_kw)
+            * (SOLAR_SCALE // TIME_SCALE)
+        )
+        grid_units = demand_units - min(pool_units, process_cap_units)
+        tariff_units = int(round(
+            get_tariff(hour, tariff_profile) * COST_SCALE
+        ))
+        minute_costs.append(tariff_units * grid_units)
+
+    prefix = [0]
+    for cost in minute_costs:
+        prefix.append(prefix[-1] + cost)
+    duration = process.duration_minutes
+    return [
+        prefix[start + duration] - prefix[start]
+        for start in range(maximum_start + 1)
+    ]
+
+
+def _create_serial_chain_cost_schedule(
+    config,
+    order,
+    baseline_schedule,
+    solar_profile,
+    tariff_profile,
+    max_time_seconds,
+):
+    """Optimize an exact serial chain by dynamic programming over all starts."""
+    started = time.perf_counter()
+    deadline = (
+        started + float(max_time_seconds)
+        if max_time_seconds is not None else None
+    )
+
+    def check_time_limit():
+        elapsed = time.perf_counter() - started
+        if deadline is not None and time.perf_counter() >= deadline:
+            raise SolverUnknownError(
+                "serial-chain optimization hit the time limit without "
+                "completing the exact dynamic program",
+                solve_time_seconds=round(elapsed, 4),
+            )
+
+    domains = _calculate_start_domains(config)
+    baseline_starts = {}
+    for row in baseline_schedule["processes"]:
+        minute = schedule_time_to_minute_count(row["start_time"])
+        if minute is None:
+            return None
+        baseline_starts[row["process_id"]] = minute
+    fixed_starts = {
+        process.process_id: baseline_starts[process.process_id]
+        for process in config.processes
+        if not process.is_flexible
+    }
+    for process_id, minute in fixed_starts.items():
+        lower, upper = domains[process_id]
+        if not lower <= minute <= upper:
+            return None
+
+    has_full_horizon_profiles = any(
+        isinstance(hour, int) and hour >= 24
+        for profile in (solar_profile, tariff_profile)
+        for hour in profile
+    )
+    cost_by_process = {}
+    for process_id in order:
+        check_time_limit()
+        process = config.get_process(process_id)
+        if has_full_horizon_profiles:
+            cost_by_process[process_id] = _serial_process_cost_by_start(
+                process,
+                solar_profile,
+                tariff_profile,
+                domains[process_id][1],
+                check_time_limit,
+            )
+        else:
+            cost_by_process[process_id] = _serial_process_cost_by_phase(
+                process, solar_profile, tariff_profile
+            )
+
+    parents = []
+    previous_costs = {}
+    for index, process_id in enumerate(order):
+        check_time_limit()
+        process = config.get_process(process_id)
+        lower, upper = domains[process_id]
+        if process_id in fixed_starts:
+            lower = upper = fixed_starts[process_id]
+        if lower > upper:
+            return None
+
+        current_costs = {}
+        previous_for_start = {}
+        if index == 0:
+            for start in range(lower, upper + 1):
+                if start & 1023 == 0:
+                    check_time_limit()
+                current_costs[start] = cost_by_process[process_id][
+                    start if has_full_horizon_profiles
+                    else start % (24 * TIME_SCALE)
+                ]
+        else:
+            previous_id = order[index - 1]
+            previous_process = config.get_process(previous_id)
+            previous_starts = list(previous_costs)
+            cursor = 0
+            best_prefix = None
+            for start in range(lower, upper + 1):
+                if start & 1023 == 0:
+                    check_time_limit()
+                while (cursor < len(previous_starts)
+                       and previous_starts[cursor]
+                       + previous_process.duration_minutes <= start):
+                    prior_start = previous_starts[cursor]
+                    candidate = (
+                        previous_costs[prior_start],
+                        prior_start,
+                    )
+                    if best_prefix is None or candidate < best_prefix:
+                        best_prefix = candidate
+                    cursor += 1
+                if best_prefix is not None:
+                    current_costs[start] = (
+                        best_prefix[0]
+                        + cost_by_process[process_id][
+                            start if has_full_horizon_profiles
+                            else start % (24 * TIME_SCALE)
+                        ]
+                    )
+                    previous_for_start[start] = best_prefix[1]
+        if not current_costs:
+            return None
+        parents.append(previous_for_start)
+        previous_costs = current_costs
+
+    final_id = order[-1]
+    final_process = config.get_process(final_id)
+    final_start = min(
+        previous_costs,
+        key=lambda start: (
+            previous_costs[start],
+            start + final_process.duration_minutes,
+        ),
+    )
+    starts = {final_id: final_start}
+    for index in range(len(order) - 1, 0, -1):
+        starts[order[index - 1]] = parents[index][starts[order[index]]]
+
+    check_time_limit()
+    makespan = max(
+        starts[process.process_id] + process.duration_minutes
+        for process in config.processes
+    )
+    horizon = time_to_grid_floor(config.planning_horizon_hours)
+    total_cost_units = previous_costs[final_start]
+    objective = total_cost_units * (horizon + 1) + makespan
+    return _build_schedule_from_minute_times(
+        config,
+        {
+            process_id: (
+                start,
+                start + config.get_process(process_id).duration_minutes,
+            )
+            for process_id, start in starts.items()
+        },
+        "OPTIMAL",
+        solar_profile,
+        tariff_profile,
+        with_cost=True,
+        solve_time_seconds=round(time.perf_counter() - started, 4),
+        best_objective=objective,
+        best_bound=objective,
+    )
 
 
 def _process_allowed_slots(config, horizon_slots, prune_domains,
@@ -479,7 +755,7 @@ def _process_allowed_slots(config, horizon_slots, prune_domains,
     ranges = {}
     for process in config.processes:
         pid = process.process_id
-        duration = int(process.duration_hours * TIME_SCALE)
+        duration = process.duration_minutes
         lower_start, upper_start = start_domains[pid]
         if prune_domains and pid in fixed_start_times:
             lower_start = upper_start = fixed_start_times[pid]
@@ -500,16 +776,16 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
                            prune_domains=True, fixed_start_times=None,
                            collect_demand=True, active_hours=None):
     """
-    Encode solar as a SHARED half-hour resource INSIDE the CP-SAT model.
+    Encode solar as a shared per-minute resource inside the CP-SAT model.
 
-    For every half-hour slot s the model carries an integer variable
-    used[s] (0.1 kWh units, SOLAR_SCALE), bounded by both the solar energy
+    For every minute tick s the model carries an integer variable
+    used[s] (1/600 kWh units, SOLAR_SCALE), bounded by both the solar energy
     available in that slot and the sum of running-process draw caps.
 
     draw_cap[p, s] is a linear expression over run[p, t] booleans
     ("process p starts at slot t", exactly-one linked to the existing
     start-time variables): a running process can draw at most
-    min(solar_kw, power_kw) per occupied half-hour slot, and nothing in
+    min(solar_kw, power_kw) per occupied minute, and nothing in
     hours it does not occupy.
 
     The booleans use ONE-directional reification: b_t => start == t, plus
@@ -536,7 +812,7 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
 
     The aggregate form is exact: for any fixed schedule the deterministic
     greedy split used for reporting realizes exactly
-    min(pool, sum of draw caps) per half-hour slot - precisely the model's
+    min(pool, sum of draw caps) per minute - precisely the model's
     upper bound - so optimized objective values equal reported numbers.
     The pool constraint is part of the optimization model, not a post-solve
     adjustment.
@@ -544,7 +820,7 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
     Returns:
         (used, demand): dicts keyed by hour (int).
         used[h]   linear expression - total allocated solar in hour h,
-                  summed from its half-hour slot variables
+                  summed from its per-minute slot variables
         demand[h] linear expression (or int 0) - total process energy
                   demand in hour h, 0.1 kWh units
     """
@@ -596,14 +872,14 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
         first_slot, last_slot, duration = allowed[pid]
         if first_slot > last_slot:
             continue  # cannot run anywhere - no draw in any hour
-        per_slot_demand_u = int(round(power * 0.5 * SOLAR_SCALE))
+        per_slot_demand_u = int(power * (SOLAR_SCALE // TIME_SCALE))
         first_hour = max(0, first_slot // TIME_SCALE)
         last_hour = min(horizon_hours - 1,
                         (last_slot + duration - 1) // TIME_SCALE)
         for hour in range(first_hour, last_hour + 1):
             if hour not in active:
                 continue
-            solar_kw = solar_profile.get(hour % 24, 0)
+            solar_kw = get_solar_availability(hour, solar_profile)
             hour_start = hour * TIME_SCALE
             hour_end = hour_start + TIME_SCALE
             lo = max(first_slot, hour_start - duration + 1)
@@ -618,9 +894,7 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
                     terms.append(per_slot_demand_u * cnt * run[(pid, slot)])
             if solar_kw <= 0:
                 continue
-            per_tick_u = int(round(
-                min(solar_kw, power) * SOLAR_SCALE / TIME_SCALE
-            ))
+            per_tick_u = int(min(solar_kw, power) * (SOLAR_SCALE // TIME_SCALE))
             if per_tick_u <= 0:
                 continue
             for tick in range(hour_start, min(hour_end, horizon_slots)):
@@ -635,14 +909,12 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
     used = {}
     demand = {}
     for hour in range(horizon_hours):
-        solar_kw = solar_profile.get(hour % 24, 0)
+        solar_kw = get_solar_availability(hour, solar_profile)
         slot_uses = []
         for tick in range(hour * TIME_SCALE,
                           min((hour + 1) * TIME_SCALE, horizon_slots)):
             terms = cap_terms.get(tick)
-            pool_u = max(int(round(
-                solar_kw * SOLAR_SCALE / TIME_SCALE
-            )), 0)
+            pool_u = max(int(solar_kw * (SOLAR_SCALE // TIME_SCALE)), 0)
             used_tick = model.new_int_var(
                 0, pool_u if terms else 0, f"solar_used_{tick}"
             )
@@ -660,18 +932,18 @@ def _add_shared_solar_pool(config, model, start_times, solar_profile,
 def _allocate_solar_by_slot(rows, solar_profile, tariff_profile=None,
                             include_grid_by_slot=False):
     """Return per-process totals and optionally grid energy per slot."""
-    # Collect running processes per half-hour slot with their overlap.
+    # Collect running processes per exact minute with their overlap.
     running_by_slot = {}
     for row in rows:
-        t = row["start_time"]
-        while t < row["end_time"]:
-            slot = int(t * TIME_SCALE)
-            slot_end = (slot + 1) / TIME_SCALE
-            overlap = min(slot_end, row["end_time"]) - t
+        start_tick = schedule_time_to_minute_count(row["start_time"])
+        end_tick = schedule_time_to_minute_count(row["end_time"])
+        if start_tick is None or end_tick is None:
+            raise FactoryConfigError("schedule times must lie on exact minute boundaries")
+        for slot in range(start_tick, end_tick):
+            overlap = 1 / TIME_SCALE
             running_by_slot.setdefault(slot, []).append(
                 (row["process_id"], row["power_kw"] * overlap, overlap)
             )
-            t += overlap
 
     allocation = {
         row["process_id"]: {"solar_kwh": 0.0, "grid_kwh": 0.0,
@@ -711,7 +983,7 @@ def allocate_solar_greedy(rows, solar_profile, tariff_profile=None):
     """
     Deterministic shared-solar allocation for reporting.
 
-    Solar is shared within each half-hour slot and is allocated in
+    Solar is shared within each minute and is allocated in
     process_id order. Returns per-process solar, grid, and optional cost
     totals without exposing the internal slot breakdown.
     """
@@ -724,20 +996,51 @@ def allocate_solar_greedy(rows, solar_profile, tariff_profile=None):
 def _extract_schedule(config, solver, status_name, start_times, end_times,
                       solar_profile, tariff_profile, with_cost):
     """Build the schedule result dict from a solved model (generic)."""
-    # Pass 1: collect scheduled times (shared-solar allocation needs ALL
-    # concurrent processes before splitting each slot's supply)
-    times = []
+    minute_times = {}
     for process in config.processes:
-        times.append((
+        minute_times[process.process_id] = (
+            solver.Value(start_times[process.process_id]),
+            solver.Value(end_times[process.process_id]),
+        )
+    return _build_schedule_from_minute_times(
+        config,
+        minute_times,
+        status_name,
+        solar_profile,
+        tariff_profile,
+        with_cost,
+        solve_time_seconds=solver.WallTime(),
+        best_objective=solver.ObjectiveValue(),
+        best_bound=solver.BestObjectiveBound(),
+    )
+
+
+def _build_schedule_from_minute_times(
+    config,
+    minute_times,
+    status_name,
+    solar_profile,
+    tariff_profile,
+    with_cost,
+    solve_time_seconds,
+    best_objective,
+    best_bound,
+):
+    """Format exact internal minute ticks into the existing hours response."""
+    times = [
+        (
             process,
-            solver.Value(start_times[process.process_id]) / TIME_SCALE,
-            solver.Value(end_times[process.process_id]) / TIME_SCALE,
-        ))
+            minute_times[process.process_id][0] / TIME_SCALE,
+            minute_times[process.process_id][1] / TIME_SCALE,
+            minute_times[process.process_id][0],
+        )
+        for process in config.processes
+    ]
 
     rows = [
         {"process_id": p.process_id, "start_time": s, "end_time": e,
          "power_kw": p.power_kw}
-        for p, s, e in times
+        for p, s, e, _ in times
     ]
     allocation = allocate_solar_greedy(rows, solar_profile,
                                        tariff_profile if with_cost else None)
@@ -745,15 +1048,15 @@ def _extract_schedule(config, solver, status_name, start_times, end_times,
     schedule = {
         "status": status_name,
         "factory_name": config.factory_name,
-        "makespan": max(e for _, _, e in times),
-        "solve_time_seconds": round(solver.WallTime(), 4) if solver is not None else None,
+        "makespan": max(e for _, _, e, _ in times),
+        "solve_time_seconds": round(solve_time_seconds, 4),
         "solver_diagnostics": {
             "status": status_name,
-            "best_objective": solver.ObjectiveValue(),
-            "best_bound": solver.BestObjectiveBound(),
+            "best_objective": best_objective,
+            "best_bound": best_bound,
             "optimality_gap": round(
-                abs(solver.ObjectiveValue() - solver.BestObjectiveBound())
-                / max(abs(solver.ObjectiveValue()), 1.0),
+                abs(best_objective - best_bound)
+                / max(abs(best_objective), 1.0),
                 6,
             ),
         },
@@ -765,11 +1068,11 @@ def _extract_schedule(config, solver, status_name, start_times, end_times,
     if with_cost:
         schedule["total_energy_cost"] = 0
 
-    for process, start_time, end_time in times:
+    for process, start_time, end_time, start_minute in times:
         alloc = allocation[process.process_id]
         solar_energy = alloc["solar_kwh"]
         grid_energy = alloc["grid_kwh"]
-        total_energy = process.power_kw * process.duration_hours
+        total_energy = process.power_kw * process.duration_minutes / TIME_SCALE
 
         entry = {
             "process_id": process.process_id,
@@ -786,13 +1089,17 @@ def _extract_schedule(config, solver, status_name, start_times, end_times,
                 if process.machine_id is not None else None
             ),
             "quantity": process.quantity,
-            "solar_availability": get_solar_availability(int(start_time), solar_profile),
+            "solar_availability": get_solar_availability(
+                start_minute // TIME_SCALE, solar_profile
+            ),
             "solar_energy_kwh": solar_energy,
             "grid_energy_kwh": grid_energy,
         }
         if with_cost:
             energy_cost = alloc["energy_cost"]
-            entry["tariff"] = get_tariff(int(start_time), tariff_profile)
+            entry["tariff"] = get_tariff(
+                start_minute // TIME_SCALE, tariff_profile
+            )
             entry["energy_cost"] = energy_cost
             schedule["total_energy_cost"] += energy_cost
 
@@ -919,9 +1226,13 @@ def create_solar_aware_schedule(factory_data, solar_profile=None,
     # Add solution hints from baseline schedule to speed up optimality proof
     # This gives CP-SAT a high-quality starting point
     baseline_start_units = {
-        p["process_id"]: int(round(p["start_time"] * TIME_SCALE))
+        p["process_id"]: schedule_time_to_minute_count(p["start_time"])
         for p in baseline["processes"]
     }
+    if any(value is None for value in baseline_start_units.values()):
+        raise FactoryConfigError(
+            "baseline schedule contains a non-minute-aligned start time"
+        )
     fixed_start_units = {
         process.process_id: baseline_start_units[process.process_id]
         for process in config.processes
@@ -935,7 +1246,7 @@ def create_solar_aware_schedule(factory_data, solar_profile=None,
             )
 
     # Objective: maximize total ALLOCATED solar energy under the SHARED
-    # half-hour-slot pool (makespan as a secondary tiebreaker). The pool lives
+    # per-minute pool (makespan as a secondary tiebreaker). The pool lives
     # inside the model, so the optimizer sees exactly the physical solar
     # that post-solve reporting allocates.
     planning_horizon = time_to_grid_floor(config.planning_horizon_hours)
@@ -948,7 +1259,7 @@ def create_solar_aware_schedule(factory_data, solar_profile=None,
         collect_demand=False,
     )
 
-    # total_solar_score = SUM of allocated solar over ALL hours (0.1 kWh
+    # total_solar_score = SUM of allocated solar over ALL hours (1/600 kWh
     # units; per-process splits are realized by the reporting allocator).
     total_solar_score = sum(share.values(), 0)
 
@@ -1005,7 +1316,7 @@ def create_cost_optimized_schedule(factory_data, solar_profile=None,
     Create a solar + tariff cost-optimized production schedule (Version 3+).    Primary objective: minimize total electricity cost.
     Secondary objective: minimize makespan (tiebreaker when cost is equal).
 
-    Solar is a SHARED half-hour-slot pool inside the model (see
+    Solar is a SHARED per-minute pool inside the model (see
     _add_shared_solar_pool): the in-model energy and cost definitions are
     exactly the post-solve reporting definitions applied to each slot:
         solar allocated in a slot <= min(pool supply, total draw caps)
@@ -1034,17 +1345,37 @@ def create_cost_optimized_schedule(factory_data, solar_profile=None,
     if precision_problems:
         raise FactoryConfigError("; ".join(precision_problems))
 
-    model, start_times, end_times = _build_base_model(config)
+    serial_order = _serial_chain_order(config)
+    serial_baseline = baseline_schedule
+    if serial_order is not None:
+        if serial_baseline is None:
+            serial_baseline = create_baseline_schedule(
+                config,
+                solar_profile=s_profile,
+                tariff_profile=t_profile,
+            )
+        if serial_baseline is None:
+            return None
+        serial_schedule = _create_serial_chain_cost_schedule(
+            config,
+            serial_order,
+            serial_baseline,
+            s_profile,
+            t_profile,
+            max_time_seconds,
+        )
+        if serial_schedule is not None:
+            return serial_schedule
 
-    # Integer scaling for costs (0.001 currency resolution for DEMO tariffs)
-    COST_SCALE = 1000
+    model, start_times, end_times = _build_base_model(config)
 
     planning_horizon = time_to_grid_floor(config.planning_horizon_hours)
 
     # Non-flexible processes must remain at their baseline positions: their
     # grid cost is then constant and is reported from the actual schedule.
     baseline = _pin_non_flexible_processes(
-        config, model, start_times, baseline_schedule
+        config, model, start_times,
+        serial_baseline if serial_order is not None else baseline_schedule,
     )
     if baseline is None:
         return None
@@ -1052,7 +1383,7 @@ def create_cost_optimized_schedule(factory_data, solar_profile=None,
     # Add solution hints from baseline schedule to speed up optimality proof
     # This gives CP-SAT a high-quality starting point
     baseline_start_units = {
-        p["process_id"]: int(round(p["start_time"] * TIME_SCALE))
+        p["process_id"]: schedule_time_to_minute_count(p["start_time"])
         for p in baseline["processes"]
     }
     fixed_start_units = {
@@ -1070,7 +1401,7 @@ def create_cost_optimized_schedule(factory_data, solar_profile=None,
     # Objective: minimize total grid electricity cost. Per clock hour:
     #     grid energy = process demand - allocated (shared) solar
     #     cost        = grid energy x tariff[hour]
-    # All terms are integer linear expressions (solar units = 0.1 kWh).
+    # All terms are integer linear expressions (solar units = 1/600 kWh).
     horizon_hours = (planning_horizon + TIME_SCALE - 1) // TIME_SCALE
     tariff_mille = {
         hour: int(round(get_tariff(hour, t_profile) * COST_SCALE))
@@ -1080,9 +1411,9 @@ def create_cost_optimized_schedule(factory_data, solar_profile=None,
     # the pool builder only constructs demand/share expressions for the
     # hours below (identical objective, smaller model).
     active_hours = {hour for hour in range(horizon_hours)
-                    if tariff_mille[hour % 24] != 0}
+                    if tariff_mille[hour] != 0}
 
-    # Solar is a SHARED half-hour-slot pool INSIDE the model (see helper): the cost
+    # Solar is a SHARED per-minute pool INSIDE the model (see helper): the cost
     # objective therefore optimizes against physically available solar, the
     # same allocation rule post-solve reporting applies.
     share, demand = _add_shared_solar_pool(
@@ -1092,7 +1423,7 @@ def create_cost_optimized_schedule(factory_data, solar_profile=None,
         active_hours=active_hours,
     )
     cost_terms = [
-        tariff_mille[hour % 24] * (demand[hour] - share[hour])
+        tariff_mille[hour] * (demand[hour] - share[hour])
         for hour in sorted(active_hours)
     ]
     total_cost_expr = sum(cost_terms, 0)

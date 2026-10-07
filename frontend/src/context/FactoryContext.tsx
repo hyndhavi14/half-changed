@@ -1,52 +1,49 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
+import { runOptimization as requestOptimization } from '../data/api'
+import { listBackendFactories, loadBackendFactory } from '../data/backendApi'
+import type { BackendFactoryData } from '../data/backendApi'
+import type { FrontendFactoryRef } from '../data/backendContracts'
 import factories from '../data/factories'
-import {
-  getFactories,
-  getFactory,
-  runOptimization as requestOptimization,
-} from '../data/api'
-import type { Factory } from '../data/types'
 import { FactoryContext } from './FactoryContextState'
 
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
 
 export function FactoryProvider({ children }: { children: ReactNode }) {
-  const [factoryId, setFactoryId] = useState('choc')
-  const [apiFactories, setApiFactories] = useState<Factory[]>(
-    USE_MOCK ? factories : [],
-  )
-  const [customFactories, setCustomFactories] = useState<Factory[]>([])
+  const [factoryId, setFactoryId] = useState('')
+  const [apiFactories, setApiFactories] = useState<FrontendFactoryRef[]>([])
+  const [backendData, setBackendData] = useState<BackendFactoryData | null>(null)
+  const factory = factories[0]
   const [loading, setLoading] = useState(!USE_MOCK)
   const [error, setError] = useState<string | null>(null)
   const [optimizing, setOptimizing] = useState(false)
   const [optimizationError, setOptimizationError] = useState<string | null>(null)
-  const allFactories = useMemo(
-    () => [...apiFactories, ...customFactories],
-    [apiFactories, customFactories],
-  )
-  const factory =
-    allFactories.find((item) => item.id === factoryId) ??
-    allFactories[0] ??
-    factories[0]
-
+  const allFactories = apiFactories
   const loadFactories = useCallback(
-    () =>
-      getFactories()
-        .then((loadedFactories) => {
-          setApiFactories(loadedFactories)
+    async () => {
+      if (USE_MOCK) {
+        setError('Explicit mock mode does not provide canonical Backend factory data.')
+        setLoading(false)
+        return
+      }
+      try {
+        const loadedFactories = await listBackendFactories()
+        setApiFactories(loadedFactories)
+        setFactoryId((current) =>
+          loadedFactories.some((item) => item.id === current)
+            ? current
+            : loadedFactories[0]?.id ?? '',
+        )
+        if (loadedFactories.length === 0) {
+          setBackendData(null)
           setError(null)
-        })
-        .catch((loadError: unknown) => {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'Factory data could not be loaded.',
-          )
-        })
-        .finally(() => {
-          setLoading(false)
-        }),
+        }
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Factory data could not be loaded.')
+      } finally {
+        setLoading(false)
+      }
+    },
     [],
   )
 
@@ -60,27 +57,40 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
     void loadFactories()
   }, [loadFactories])
 
-  const addFactory = useCallback((newFactory: Factory) => {
-    setCustomFactories((existing) => [
-      ...existing.filter((item) => item.id !== newFactory.id),
-      newFactory,
-    ])
-    setFactoryId(newFactory.id)
-  }, [])
+  useEffect(() => {
+    if (!factoryId || !apiFactories.some((item) => item.id === factoryId)) return
+    let active = true
+    setLoading(true)
+    setError(null)
+    void loadBackendFactory(factoryId)
+      .then((loaded) => {
+        if (active) setBackendData(loaded)
+      })
+      .catch((loadError: unknown) => {
+        if (active) {
+          setBackendData(null)
+          setError(loadError instanceof Error ? loadError.message : 'Factory data could not be loaded.')
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [factoryId, apiFactories])
 
   const optimizeFactory = useCallback(async () => {
-    const selectedId = factory.id
+    const selectedId = factoryId
+    if (!selectedId) {
+      setOptimizationError('Select a persisted factory before running optimization.')
+      return
+    }
     setOptimizing(true)
     setOptimizationError(null)
     try {
       await requestOptimization(selectedId)
-      if (USE_MOCK && customFactories.some((item) => item.id === selectedId)) {
-        return
-      }
-      const updated = await getFactory(selectedId)
-      setApiFactories((existing) =>
-        existing.map((item) => (item.id === updated.id ? updated : item)),
-      )
+      setBackendData(await loadBackendFactory(selectedId))
     } catch (optimizationFailure) {
       const message =
         optimizationFailure instanceof Error
@@ -90,14 +100,15 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
     } finally {
       setOptimizing(false)
     }
-  }, [factory.id, customFactories])
+  }, [factoryId])
 
   const value = useMemo(
     () => ({
       factory,
       factories: allFactories,
+      selectedFactoryId: factoryId,
+      backendData,
       setFactoryId,
-      addFactory,
       loading,
       error,
       reloadFactories,
@@ -108,7 +119,8 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
     [
       factory,
       allFactories,
-      addFactory,
+      factoryId,
+      backendData,
       loading,
       error,
       reloadFactories,

@@ -12,12 +12,14 @@ import { SignJWT } from 'jose'
 import { NextRequest } from 'next/server'
 
 import { closeDb, getDb } from '@/lib/offline/db'
+import { client } from '@/lib/repositories/base'
 import { initOfflineSchema } from '@/lib/offline/init'
 import { seedOfflineDatabase } from '@/lib/offline/seed'
 import { resetEnvCache } from '@/lib/env'
 import { MAX_JSON_BODY_BYTES } from '@/lib/http'
 
 import { GET as factoriesGET, POST as factoriesPOST } from '@/app/api/v1/factories/route'
+import { POST as factoryBuilderPOST } from '@/app/api/v1/factory-builder/route'
 import { DELETE as factoryDELETE, GET as factoryGET, PATCH as factoryPATCH } from '@/app/api/v1/factories/[factoryId]/route'
 import { GET as configGET, PATCH as configPATCH, PUT as configPUT } from '@/app/api/v1/factories/[factoryId]/config/route'
 import { GET as factorySummaryGET } from '@/app/api/v1/factories/[factoryId]/summary/route'
@@ -247,6 +249,60 @@ describe('real route authentication and public health behavior', () => {
     const response = await healthGET()
     expect(response.status).toBe(200)
     expect((await json(response)).data.status).toBe('ok')
+  })
+
+  it('keeps optimization and factory-data mutations protected from anonymous callers', async () => {
+    const params = { factoryId }
+    const optimization = await invoke(
+      optimizationPOST,
+      factoryPath('/optimization-requests'),
+      params,
+      { method: 'POST', body: {} },
+    )
+    const energy = await invoke(
+      energyPOST,
+      factoryPath('/energy-data'),
+      params,
+      { method: 'POST', body: {} },
+    )
+    const tariff = await invoke(
+      tariffsPOST,
+      factoryPath('/tariffs'),
+      params,
+      { method: 'POST', body: {} },
+    )
+    const schedules = await invoke(
+      schedulesPOST,
+      factoryPath('/schedules'),
+      params,
+      { method: 'POST', body: {} },
+    )
+    const scheduleUpdate = await invoke(
+      schedulePATCH,
+      factoryPath('/schedules/not-real'),
+      { factoryId, scheduleId: 'not-real' },
+      { method: 'PATCH', body: {} },
+    )
+    const energyUpdate = await invoke(
+      energyPATCH,
+      factoryPath('/energy-data/not-real'),
+      { factoryId, energyId: 'not-real' },
+      { method: 'PATCH', body: {} },
+    )
+    const tariffUpdate = await invoke(
+      tariffPATCH,
+      factoryPath('/tariffs/not-real'),
+      { factoryId, tariffId: 'not-real' },
+      { method: 'PATCH', body: {} },
+    )
+
+    expect(optimization.status).toBe(401)
+    expect(energy.status).toBe(401)
+    expect(tariff.status).toBe(401)
+    expect(schedules.status).toBe(401)
+    expect(scheduleUpdate.status).toBe(401)
+    expect(energyUpdate.status).toBe(401)
+    expect(tariffUpdate.status).toBe(401)
   })
 })
 
@@ -747,6 +803,7 @@ describe('optimizer HTTP boundary', () => {
       method: 'POST',
       body: { horizon_start: START, horizon_end: END },
     })
+
     expect(response.status).toBe(503)
     const body = await json(response)
     expect(body.error.code).toBe('service_unavailable')
@@ -908,6 +965,7 @@ describe('resource PATCH and DELETE route behavior', () => {
     const deleted = await invoke(factoryDELETE, `/api/v1/factories/${id}`, { factoryId: id }, {
       token: auth, method: 'DELETE',
     })
+
     expect(deleted.status).toBe(200)
     expect((await json(deleted)).data).toMatchObject({ id, deleted: true })
 
@@ -1187,5 +1245,99 @@ describe('resource PATCH and DELETE route behavior', () => {
       token: auth, method: 'DELETE',
     })
     expect(missingDelete.status).toBe(404)
+  })
+})
+
+describe('transactional Factory Builder persistence', () => {
+  const payload = {
+    factory: {
+      slug: 'builder-transactional-test',
+      name: 'Builder Transactional Test',
+      industry: 'Food processing',
+      currency: 'INR',
+      working_hours_per_day: 8,
+      solar_capacity_kw: 40,
+      peak_tariff: 12,
+      off_peak_tariff: 6,
+    },
+    machines: [{
+      slug: 'builder-mixer',
+      name: 'Builder mixer',
+      type: 'mixer',
+      rated_power_kw: 40,
+      is_active: true,
+    }],
+    processes: [{
+      slug: 'builder-mixing',
+      name: 'Builder mixing',
+      machine_slug: 'builder-mixer',
+      duration_minutes: 40,
+      is_active: true,
+    }],
+  }
+
+  it('restricts create to admins and persists all Builder rows in one operation', async () => {
+    const denied = await factoryBuilderPOST(makeRequest('/api/v1/factory-builder', {
+      token: await ownerToken(),
+      method: 'POST',
+      body: payload,
+    }))
+    expect(denied.status).toBe(403)
+
+    const created = await factoryBuilderPOST(makeRequest('/api/v1/factory-builder', {
+      token: await adminToken(),
+      method: 'POST',
+      body: payload,
+    }))
+    expect(created.status).toBe(201)
+    const savedId = ((await json(created)).data as { factory_id: string }).factory_id
+    const db = getDb()
+    expect(db.prepare('SELECT id FROM factories WHERE id = ?').get(savedId)).toBeDefined()
+    expect(db.prepare('SELECT id FROM machines WHERE factory_id = ?').all(savedId)).toHaveLength(1)
+    expect(db.prepare('SELECT id FROM processes WHERE factory_id = ?').all(savedId)).toHaveLength(1)
+    expect(db.prepare('SELECT id FROM electricity_tariffs WHERE factory_id = ?').all(savedId)).toHaveLength(3)
+  })
+
+  it('allows only granted-factory edits and preserves the factory UUID', async () => {
+    const created = await factoryBuilderPOST(makeRequest('/api/v1/factory-builder', {
+      token: await adminToken(),
+      method: 'POST',
+      body: { ...payload, factory: { ...payload.factory, slug: unique('builder-edit') } },
+    }))
+    expect(created.status).toBe(201)
+    const savedId = ((await json(created)).data as { factory_id: string }).factory_id
+    const updated = await factoryBuilderPOST(makeRequest('/api/v1/factory-builder', {
+      token: await token({ factory_ids: [savedId] }),
+      method: 'POST',
+      body: {
+        ...payload,
+        factory_id: savedId,
+        factory: { ...payload.factory, slug: 'unchanged-on-edit', name: 'Updated Builder Test' },
+      },
+    }))
+    expect(updated.status).toBe(200)
+    expect((await json(updated)).data.factory_id).toBe(savedId)
+    expect(getDb().prepare('SELECT name FROM factories WHERE id = ?').get(savedId)).toMatchObject({
+      name: 'Updated Builder Test',
+    })
+
+    const denied = await factoryBuilderPOST(makeRequest('/api/v1/factory-builder', {
+      token: await ownerToken(),
+      method: 'POST',
+      body: { ...payload, factory_id: savedId },
+    }))
+    expect(denied.status).toBe(404)
+  })
+
+  it('rolls back the transaction if a child reference fails', async () => {
+    const attemptedSlug = unique('builder-rollback')
+    const result = await client().rpc('save_factory_builder', {
+      p_factory_id: null,
+      p_factory: { ...payload.factory, slug: attemptedSlug },
+      p_machines: payload.machines,
+      p_processes: [{ ...payload.processes[0], machine_slug: 'missing-machine' }],
+    })
+    expect(result.error).not.toBeNull()
+    expect(getDb().prepare('SELECT id FROM factories WHERE slug = ?').get(attemptedSlug)).toBeUndefined()
   })
 })

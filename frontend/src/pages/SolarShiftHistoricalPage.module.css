@@ -1,0 +1,251 @@
+.page {
+  display: grid;
+  gap: 1.25rem;
+  padding: clamp(1rem, 2.5vw, 2rem);
+  color: #172033;
+}
+
+.pageHeader h1,
+.scenarioHeader h2 {
+  margin: 0.2rem 0 0.5rem;
+}
+
+.pageHeader > p:last-child {
+  margin: 0;
+  color: #526077;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #526077;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.labels span,
+.status {
+  border: 1px solid #d7deea;
+  border-radius: 999px;
+  background: #f5f7fb;
+  color: #26364f;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.scenarios {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.scenario {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+  padding: clamp(1rem, 2vw, 1.5rem);
+  border: 1px solid #dce3ee;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 0.5rem 1.5rem rgb(25 42 70 / 6%);
+}
+
+.scenarioHeader,
+.scheduleHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.banner {
+  display: grid;
+  gap: 0.3rem;
+  border-left: 0.25rem solid #2a8b65;
+  border-radius: 0.25rem;
+  background: #eff8f3;
+  padding: 0.85rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.summary,
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.summary > div,
+.metrics > div {
+  min-width: 0;
+  border: 1px solid #e3e8f0;
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.summary dt,
+.metrics dt {
+  color: #526077;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.summary dd,
+.metrics dd {
+  margin: 0.35rem 0 0;
+  font-weight: 700;
+}
+
+.stats,
+.tariffs,
+.assumptions {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.stats h3,
+.tariffs h3,
+.assumptions h3,
+.scheduleHeading h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.stats ul,
+.assumptions ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.stats ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.35rem 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.stats li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid #e8edf4;
+  padding: 0.35rem 0;
+}
+
+.stats p,
+.assumptions p {
+  margin: 0;
+  color: #526077;
+}
+
+.tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.82rem;
+}
+
+.tableWrap th,
+.tableWrap td {
+  border-bottom: 1px solid #e8edf4;
+  padding: 0.55rem 0.65rem;
+  vertical-align: top;
+}
+
+.tableWrap thead th {
+  color: #526077;
+  white-space: nowrap;
+}
+
+.outputLabel {
+  margin: 0;
+  color: #30486d;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.scheduleGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.factory3dLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.factory3dLinks a {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  border: 1px solid #2a8b65;
+  border-radius: 0.6rem;
+  background: #eff8f3;
+  color: #165d43;
+  padding: 0.55rem 0.8rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.factory3dLinks a:hover {
+  background: #dff1e7;
+}
+
+.scheduleCard {
+  display: grid;
+  align-content: start;
+  gap: 0.85rem;
+  min-width: 0;
+  border: 1px solid #e3e8f0;
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.scheduleHeading span {
+  color: #526077;
+  font-size: 0.8rem;
+}
+
+.missing,
+.notice,
+.error {
+  margin: 0;
+  border-radius: 0.65rem;
+  padding: 0.9rem 1rem;
+}
+
+.notice {
+  background: #f5f7fb;
+}
+
+
+
+.error {
+  border: 1px solid #e5a3a3;
+  background: #fff3f3;
+  color: #852424;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .scheduleGrid {
+    grid-template-columns: 1fr;
+  }
+}

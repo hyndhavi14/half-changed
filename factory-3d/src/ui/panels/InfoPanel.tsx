@@ -1,37 +1,51 @@
 import { useMachineStore } from '../../state/machineStore';
 import { useViewStore } from '../../state/viewStore';
 import { useEnergyNow } from '../../state/energyStore';
+import { useScheduleStore } from '../../state/scheduleStore';
 import { LAYOUT_BY_ID, LAYOUT, type MachineId } from '../../config/layout';
 import { DEFAULT_MESSAGES, STATUS, statusCss } from '../../config/statusStyles';
 import { MACHINE_DESCRIPTIONS } from '../../data/mock/machineDescriptions';
 import type { MachineData } from '../../data/types';
 import { cameraApi } from '../../three/cameras/cameraApi';
 
-const fmtDur = (m: number) => (m < 60 ? `${m} min` : `${m} min (${Math.round(m / 6) / 10} h)`);
+const fmtDur = (m: number | null) => (m === null ? 'Not available' : m < 60 ? `${m} min` : `${m} min (${Math.round(m / 6) / 10} h)`);
 
 function stateText(m: MachineData) {
+  if (m.status === 'unknown') return 'Operational status is not reported by the backend.';
   if (m.status === 'running') return `Processing the current batch until ${m.end_time}.`;
-  if (m.status === 'idle') return `Waiting. The next batch starts at ${m.start_time}.`;
+  if (m.status === 'idle') return m.start_time ? `Waiting. The next batch starts at ${m.start_time}.` : 'Idle.';
   return m.message || DEFAULT_MESSAGES[m.status] || '';
 }
 
 function powerText(m: MachineData) {
+  if (m.status === 'unknown' || m.power_kw === null) {
+    const rated = m.rated_power_kw ?? m.power_kw;
+    return rated === null || rated === undefined
+      ? 'Current draw not reported'
+      : `Current draw not reported · ${rated} kW rated`;
+  }
   if (m.status === 'running' || m.status === 'warning') return `${m.power_kw} kW`;
   if (m.status === 'idle') return `${Math.round(m.power_kw * 0.1 * 10) / 10} kW standby (${m.power_kw} kW rated)`;
   return `0 kW (${m.power_kw} kW rated)`;
 }
 
 /** Machine pop-up: right side on desktop, bottom sheet on phones. Esc closes it. */
-export function InfoPanel() {
+export function InfoPanel({ readOnly = false }: { readOnly?: boolean }) {
   const selectedId = useViewStore((s) => s.selectedId);
   const set = useViewStore((s) => s.set);
   const m = useMachineStore((s) => (selectedId ? s.machines[selectedId] : undefined));
+  const schedule = useScheduleStore((s) => s.schedule);
   const e = useEnergyNow();
   if (!m) return null;
 
-  const def = LAYOUT_BY_ID[m.machine_id as MachineId];
+  const layoutId = m.layout_id ?? m.machine_id;
+  const def = LAYOUT_BY_ID[layoutId as MachineId];
+  const plannedEntries = schedule?.entries
+    .filter((entry) => entry.machine_id === m.machine_id) ?? [];
   const draws = m.status === 'running' || m.status === 'warning';
-  const source = !draws
+  const source = e.load === null || e.solar === null || e.used === null
+    ? 'Not reported'
+    : !draws
     ? 'Not drawing power'
     : e.solar >= e.load
       ? 'Solar'
@@ -48,7 +62,7 @@ export function InfoPanel() {
       </button>
       <p className="eyebrow">{def ? `Step ${def.index + 1} of ${LAYOUT.length} · ${def.stage}` : 'Machine'}</p>
       <h2>{m.name}</h2>
-      <p className="desc">{MACHINE_DESCRIPTIONS[m.machine_id] ?? ''}</p>
+      {!readOnly && <p className="desc">{MACHINE_DESCRIPTIONS[layoutId] ?? ''}</p>}
       <span className="chip">
         <span className="dot" style={{ background: statusCss(m.status) }} />
         <span>{STATUS[m.status]?.label ?? m.status}</span>
@@ -68,8 +82,38 @@ export function InfoPanel() {
         <dd>{source}</dd>
       </dl>
       <p className="state">{stateText(m)}</p>
+      {schedule && (
+        <section className="planned-schedule" aria-label="Planned schedule intervals">
+          <h3>
+            Planned intervals · v{schedule.version} · {schedule.status}
+          </h3>
+          {plannedEntries.length === 0 ? (
+            <p>No entries for this machine in the selected schedule.</p>
+          ) : (
+            <ol>
+              {plannedEntries.map((entry) => (
+                <li key={entry.id}>
+                  <strong>Process UUID</strong>
+                  <span>{entry.process_name ? `${entry.process_name} · ${entry.process_id}` : entry.process_id}</span>
+                  {entry.machine_name && (
+                    <>
+                      <strong>Assigned machine</strong>
+                      <span>{entry.machine_name}</span>
+                    </>
+                  )}
+                  <strong>Starts</strong>
+                  <time dateTime={entry.starts_at}>{entry.starts_at}</time>
+                  <strong>Ends</strong>
+                  <time dateTime={entry.ends_at}>{entry.ends_at}</time>
+                </li>
+              ))}
+            </ol>
+          )}
+          <p>Schedule entries are planned intervals, not machine operating status.</p>
+        </section>
+      )}
       <div className="row">
-        <button className="btn primary" type="button" onClick={() => cameraApi.focusMachine(m.machine_id)}>
+        <button className="btn primary" type="button" onClick={() => cameraApi.focusMachine(layoutId)}>
           Zoom to machine
         </button>
         <button className="btn ghost" type="button" onClick={() => cameraApi.goPreset('overview')}>

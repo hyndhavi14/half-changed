@@ -24,6 +24,7 @@
  */
 
 import { z } from 'zod'
+import { resolve } from 'node:path'
 import { ServiceUnavailableError, UpstreamError, ValidationError } from '../errors'
 import {
   OPEN_OPTIMIZER_QUESTIONS,
@@ -31,6 +32,7 @@ import {
   type OptimizationSolution,
   type OptimizerTransport,
 } from './contract'
+import { PythonSubprocessOptimizerTransport } from './pythonSubprocess'
 
 /* -------------------------------------------------------------------------- */
 /* Configuration                                                              */
@@ -38,6 +40,9 @@ import {
 
 export interface OptimizerConfig {
   enabled: boolean
+  transport?: string
+  pythonExecutable?: string
+  pythonWorkingDirectory?: string
   baseUrl: string
   solvePath: string
   /** Explicitly configured; never defaulted. */
@@ -66,6 +71,12 @@ export function readOptimizerConfig(): OptimizerConfig {
 
   return {
     enabled: process.env.BYTEME_OPTIMIZER_ENABLED === 'true',
+    transport: (process.env.BYTEME_OPTIMIZER_TRANSPORT ?? 'http').trim().toLowerCase(),
+    pythonExecutable: (process.env.BYTEME_OPTIMIZER_PYTHON_EXECUTABLE ?? '').trim(),
+    pythonWorkingDirectory: (
+      process.env.BYTEME_OPTIMIZER_PYTHON_WORKING_DIRECTORY ??
+      resolve(process.cwd(), '..')
+    ).trim(),
     baseUrl: (process.env.BYTEME_OPTIMIZER_BASE_URL ?? '').trim(),
     solvePath: (process.env.BYTEME_OPTIMIZER_SOLVE_PATH ?? '').trim(),
     method: (process.env.BYTEME_OPTIMIZER_SOLVE_METHOD ?? '').trim(),
@@ -87,6 +98,19 @@ export function optimizerUnavailableReason(config: OptimizerConfig = readOptimiz
   }
   if (!Number.isSafeInteger(config.timeoutMs) || config.timeoutMs < 1 || config.timeoutMs > MAX_OPTIMIZER_TIMEOUT_MS) {
     return `BYTEME_OPTIMIZER_TIMEOUT_MS must be an integer between 1 and ${MAX_OPTIMIZER_TIMEOUT_MS}.`
+  }
+  const transport = config.transport ?? 'http'
+  if (transport !== 'http' && transport !== 'python-subprocess') {
+    return 'BYTEME_OPTIMIZER_TRANSPORT must be http or python-subprocess.'
+  }
+  if (transport === 'python-subprocess') {
+    if (!config.pythonExecutable?.trim()) {
+      return 'BYTEME_OPTIMIZER_PYTHON_EXECUTABLE is not set.'
+    }
+    if (!config.pythonWorkingDirectory?.trim()) {
+      return 'BYTEME_OPTIMIZER_PYTHON_WORKING_DIRECTORY is not set.'
+    }
+    return null
   }
   if (!config.baseUrl) {
     return 'BYTEME_OPTIMIZER_BASE_URL is not set.'
@@ -413,20 +437,23 @@ export class UnconfiguredOptimizerTransport implements OptimizerTransport {
 
   readonly isConfigured = false
 
-  constructor(private readonly reason: string | null) {}
+  constructor(
+    private readonly reason: string | null,
+    private readonly requiredConfiguration = [
+      'BYTEME_OPTIMIZER_ENABLED=true',
+      'BYTEME_OPTIMIZER_BASE_URL',
+      'BYTEME_OPTIMIZER_SOLVE_PATH',
+      'BYTEME_OPTIMIZER_SOLVE_METHOD',
+      'BYTEME_OPTIMIZER_DECODER',
+    ],
+  ) {}
 
   async solve(): Promise<OptimizationSolution> {
     throw new ServiceUnavailableError(
       'The optimizer is not configured, so no schedule can be produced.',
       {
         reason: this.reason ?? 'The optimizer integration is incomplete.',
-        requiredConfiguration: [
-          'BYTEME_OPTIMIZER_ENABLED=true',
-          'BYTEME_OPTIMIZER_BASE_URL',
-          'BYTEME_OPTIMIZER_SOLVE_PATH',
-          'BYTEME_OPTIMIZER_SOLVE_METHOD',
-          'BYTEME_OPTIMIZER_DECODER',
-        ],
+        requiredConfiguration: this.requiredConfiguration,
         openQuestions: [...OPEN_OPTIMIZER_QUESTIONS],
         note: 'ByteMe does not generate a schedule without a real optimizer result.',
       },
@@ -532,7 +559,17 @@ export function createOptimizerTransport(): OptimizerTransport {
   const config = readOptimizerConfig()
   const reason = optimizerUnavailableReason(config)
 
-  if (reason) return new UnconfiguredOptimizerTransport(reason)
+  if (reason) {
+    const requiredConfiguration = config.transport === 'python-subprocess'
+      ? [
+          'BYTEME_OPTIMIZER_ENABLED=true',
+          'BYTEME_OPTIMIZER_PYTHON_EXECUTABLE',
+          'BYTEME_OPTIMIZER_PYTHON_WORKING_DIRECTORY',
+        ]
+      : undefined
+    return new UnconfiguredOptimizerTransport(reason, requiredConfiguration)
+  }
+  if (config.transport === 'python-subprocess') return new PythonSubprocessOptimizerTransport(config)
   return new HttpOptimizerTransport(config)
 }
 

@@ -3,7 +3,12 @@
 import math
 from typing import Any, NoReturn
 
-from optimizer.models import TIME_SCALE, FactoryConfig
+from optimizer.models import (
+    TIME_SCALE,
+    FactoryConfig,
+    energy_profile_value,
+    schedule_time_to_minute_count,
+)
 
 _TOLERANCE = 1e-6
 
@@ -30,15 +35,7 @@ def _close(actual, expected):
 
 
 def _aligned(value):
-    return (
-        isinstance(value, (int, float))
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and math.isclose(
-            value * TIME_SCALE, round(value * TIME_SCALE),
-            rel_tol=0.0, abs_tol=_TOLERANCE,
-        )
-    )
+    return schedule_time_to_minute_count(value) is not None
 
 
 def _number(value: Any) -> float:
@@ -54,7 +51,7 @@ def _number(value: Any) -> float:
 
 
 def _profile_value(profile, hour):
-    return profile.get(hour % 24, 0.0)
+    return energy_profile_value(profile, hour)
 
 
 def _allocate_reported_energy(rows, config):
@@ -64,8 +61,10 @@ def _allocate_reported_energy(rows, config):
     tariff_profile = energy_data["tariff_profile"]
     running_by_slot = {}
     for row in rows:
-        tick = round(row["start_time"] * TIME_SCALE)
-        end_tick = round(row["end_time"] * TIME_SCALE)
+        tick = schedule_time_to_minute_count(row["start_time"])
+        end_tick = schedule_time_to_minute_count(row["end_time"])
+        if tick is None or end_tick is None:
+            _fail("minute-aligned schedule energy allocation")
         while tick < end_tick:
             running_by_slot.setdefault(tick, []).append(
                 (row["process_id"], row["power_kw"] / TIME_SCALE)

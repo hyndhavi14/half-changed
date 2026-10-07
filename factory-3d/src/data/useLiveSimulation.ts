@@ -10,7 +10,7 @@ const INTERVAL_MS = 15000;
 /** One simulated plant event every 15 s while `live` is on. Keeps the demo moving. */
 export function simulateStep() {
   const { machines, setStatus } = useMachineStore.getState();
-  const ids = Object.keys(machines);
+  const ids = Object.keys(machines).filter((id) => machines[id]?.status !== 'unknown');
   if (!ids.length) return;
   const down = ids.filter((id) => machines[id].status !== 'running');
   let id: string;
@@ -26,7 +26,9 @@ export function simulateStep() {
   }
   setStatus(id, s);
   const energy = useEnergyStore.getState();
-  energy.setSolar(Math.max(30, Math.min(120, energy.solarKw + Math.round((Math.random() - 0.5) * 14))));
+  if (energy.solarKw !== null) {
+    energy.setSolar(Math.max(30, Math.min(120, energy.solarKw + Math.round((Math.random() - 0.5) * 14))));
+  }
   useViewStore.getState().showToast(`${machines[id].name} is now ${STATUS[s].label.toLowerCase()}`);
 }
 

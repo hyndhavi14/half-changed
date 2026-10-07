@@ -13,11 +13,17 @@ import BuilderPage from './pages/BuilderPage/BuilderPage.tsx'
 import FactoryViewPage from './pages/FactoryViewPage/FactoryViewPage.tsx'
 import NotFoundPage from './pages/NotFoundPage/NotFoundPage.tsx'
 import { FactoryProvider } from './context/FactoryContext.tsx'
+import Phase6UatPage from './pages/Phase6UatPage.tsx'
+import SolarShiftHistoricalPage from './pages/SolarShiftHistoricalPage.tsx'
 
 const router = createBrowserRouter([
   {
     path: '/',
-    element: <App />,
+    element: (
+      <FactoryProvider>
+        <App />
+      </FactoryProvider>
+    ),
     children: [
       { index: true, element: <DashboardPage /> },
       { path: 'processes', element: <ProcessesPage /> },
@@ -26,15 +32,18 @@ const router = createBrowserRouter([
       { path: 'compare', element: <ComparePage /> },
       { path: 'builder', element: <BuilderPage /> },
       { path: 'factory-view', element: <FactoryViewPage /> },
+      { path: 'solarshift-historical', element: <SolarShiftHistoricalPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
+  },
+  {
+    path: '/phase6',
+    element: <Phase6UatPage />,
   },
 ])
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <FactoryProvider>
-      <RouterProvider router={router} />
-    </FactoryProvider>
+    <RouterProvider router={router} />
   </StrictMode>,
 )

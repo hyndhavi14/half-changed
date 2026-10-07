@@ -39,7 +39,9 @@ grid emission factor), it:
 - No predictive forecasting; the solar profile is an input you supply.
 - No real-time control; it is a planning-time scheduler.
 - Non-preemptive scheduling on single-capacity machines; constant power
-  while a process runs; half-hour scheduling grid.
+  while a process runs; exact whole-minute scheduling grid. Horizon,
+  deadline, and process-window bounds retain their existing half-hour
+  rounding semantics.
 
 ## 3. Public interface
 
@@ -152,8 +154,8 @@ Field semantics:
 | `work_order_id` / `quantity_unit` | optional informational source identifier/unit; neither affects scheduling |
 | `planning_horizon_hours` | scheduling window relative to time 0; effective limit rounds down to the last half-hour tick, and the final energy bucket is clipped to the actual horizon |
 | `production_deadline` | hard completion deadline relative to time 0; effective limit rounds down to the last half-hour tick |
-| `duration_hours` | operating duration in hours; must be a multiple of 0.5 |
-| `power_kw` | constant process power while running, in kW; must be a multiple of 0.2 kW so each half-hour demand is exactly representable as 0.1 kWh |
+| `duration_hours` | exact operating duration expressed in hours; must correspond to a positive whole number of minutes |
+| `power_kw` | constant process power while running, in kW; must be a multiple of 0.2 kW so one-minute energy demand is exactly representable in the integer energy model |
 | `quantity` | informational batch/production quantity |
 | `dependencies` | process_ids that must finish before this starts; acyclic |
 | `is_flexible` | `true` = eligible to move from its baseline start in optimization, though it may remain in place; `false` = pinned to its baseline start. This flag does not itself specify a caller-selected committed timestamp. |
@@ -164,8 +166,8 @@ Field semantics:
 | `machines[].availability` | informational only; no shift, calendar, or downtime constraint is applied |
 | `machines[].compatible_processes` | informational only; a mismatch warns but does not prohibit assignment |
 | `earliest_start` / `latest_finish` | optional per-process time window in hours relative to time 0; earliest start rounds up and latest finish rounds down to the half-hour grid |
-| `energy.solar_profile` | elapsed hour index (0–23, int or numeric string) → site-wide available solar power in kW, in 0.2 kW increments; omitted hours in a supplied partial profile are 0 kW |
-| `energy.tariff_profile` | elapsed hour index (0–23, int or numeric string) → tariff per consumed grid kWh, in 0.001 currency-unit increments; omitted hours in a supplied partial profile are 0 currency units/kWh |
+| `energy.solar_profile` | elapsed-hour index (integer or numeric string) → site-wide available solar power in kW, in 0.2 kW increments |
+| `energy.tariff_profile` | elapsed-hour index (integer or numeric string) → tariff per consumed grid kWh, in 0.001 currency-unit increments |
 | `energy.grid_emission_factor` | optional kg CO2/kWh; omit → carbon = `null` |
 | `options.objective` | `"cost"` or `"solar"` (optional; overrides argument) |
 | `options.max_time_seconds` | optional per-stage solver time limit (> 0); default 60 s per stage. One request can run baseline and optimized stages, so total solver time can approach twice the limit plus input/model/API overhead. |
@@ -185,19 +187,21 @@ Changing `quantity` does not change scheduling, duration, or energy.
 
 All schedule times are relative to the beginning of the planning horizon:
 time 0 is the planning origin, not a wall-clock timestamp. Start and end
-times are expressed in hours and lie on the 0.5-hour grid. An earliest-start
-bound rounds up to the next grid tick; a latest-finish, deadline, or horizon
-bound rounds down to the preceding grid tick. The energy model includes every
-hour touched by the effective horizon. If the final grid tick is at a
-half-hour boundary, the final hourly bucket contains only that actual
-half-hour of demand; no energy is charged beyond the scheduled interval.
+times are expressed in hours and lie on the exact whole-minute grid. An
+earliest-start bound rounds up to the next half-hour boundary; a
+latest-finish, deadline, or horizon bound rounds down to the previous
+half-hour boundary, preserving the existing boundary policy. The energy
+model includes every hour touched by the effective horizon. The final
+hourly bucket is clipped to the actual scheduled minutes; no energy is
+charged beyond the scheduled interval.
 
 Profile key `h` applies to elapsed interval `[h, h + 1)` from the planning
 origin, so profile hour 0 begins at planning time 0 and is not a wall-clock
 hour. An omitted profile uses DEMO data with a warning; an omitted hour in a
-supplied partial profile means zero and is listed in a warning. For horizons
-longer than 24 hours, each profile repeats with `h % 24`. Solar values are
-available power in kW for one shared, site-wide pool. Within each half-hour
+supplied partial cyclic profile means zero and is listed in a warning. For
+horizons longer than 24 hours, keys 0–23 retain cyclic behavior; a full-horizon
+profile must provide every elapsed hour and does not repeat. Solar values are
+available power in kW for one shared, site-wide pool. Within each one-minute
 scheduling slot, available solar energy is shared among running processes
 and capped by both the profile supply for that slot and each process's power
 demand over its actual overlap. Solar is not stored or exported.
@@ -430,9 +434,9 @@ process, before the solver is invoked.
 The envelope always carries `warnings` (a list of strings, empty when
 nothing notable; consumers can ignore entries they do not recognize).
 Warnings cover non-fatal conditions such as: DEMO/SIMULATED solar or
-tariff profile used because the caller supplied none; missing profile
-hours treated as 0; planning horizons beyond 24 h (profiles cyclically
-repeated, see below); all processes marked non-flexible (zero demand-shifting
+tariff profile used because the caller supplied none; missing hours in a
+legacy cyclic profile treated as 0; planning horizons beyond 24 h using
+legacy cyclic profiles; all processes marked non-flexible (zero demand-shifting
 degrees of freedom); and uniform/flat tariff profiles during cost optimization
 (informing that timing provides no tariff-saving opportunity). Errors remain
 reserved for invalid input.
@@ -444,10 +448,20 @@ BOTH the optimization objective and the reported energy/cost figures for
 baseline and optimized schedules. The DEMO profiles are a fallback used
 only when the caller omits them (surfaced as a warning — never silently).
 
-Profiles are **24-hour cyclic**: horizons longer than 24 h wrap with
-`hour % 24`, so day-2 hour 25 uses the hour-1 value. Multi-day use adds
-an explicit warning; hours outside 0–23 in a profile remain a validation
-error.
+Two unambiguous profile forms are supported:
+
+- **Legacy cyclic profile:** keys are within `0..23`; values repeat every
+  24 elapsed hours. Partial profiles remain supported for compatibility,
+  and omitted hours continue to mean zero with a warning.
+- **Full-horizon profile:** both solar and tariff profiles provide every
+  elapsed-hour key from `0` through `planning_horizon_hours - 1`. Values are
+  used exactly at those hours and do not repeat. The planning horizon must be
+  an integer number of hours. Mixed cyclic/full-horizon profiles, gaps,
+  extra keys, or fractional-hour full-horizon horizons are invalid.
+
+For example, a 168-hour request may provide keys `0..167` to retain all
+seven days of mock/demo hourly conditions. A 24-key profile on the same
+horizon remains the explicitly cyclic legacy form.
 
 ## 6. Example request / response
 

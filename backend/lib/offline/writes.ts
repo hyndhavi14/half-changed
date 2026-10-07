@@ -31,7 +31,7 @@
 
 import type { SqliteDatabase } from './db'
 import { getDb } from './db'
-import { COLUMN_TYPES } from './schema'
+import { COLUMN_TYPES, type TableName } from './schema'
 import { offlineAggregateRpc } from './aggregates'
 
 type Row = Record<string, unknown>
@@ -261,6 +261,22 @@ function decodeEntry(row: Row): Row {
   return out
 }
 
+function decodeRpcRow(table: TableName, row: Row): Row {
+  const decoded = { ...row }
+  for (const [column, kind] of Object.entries(COLUMN_TYPES[table])) {
+    const value = decoded[column]
+    if (value === null || value === undefined) continue
+    if ((kind === 'json' || kind === 'array') && typeof value === 'string') {
+      decoded[column] = JSON.parse(value) as unknown
+    } else if (kind === 'bool') {
+      decoded[column] = value === 1
+    } else if (kind === 'number') {
+      decoded[column] = Number(value)
+    }
+  }
+  return decoded
+}
+
 export interface OfflineWriteResult {
   data: unknown
   error: ReturnType<typeof offlineEntryError> | null
@@ -331,6 +347,306 @@ export function appendScheduleEntries(
   }
 }
 
+interface OptimizationScheduleInput {
+  kind: 'baseline' | 'optimized'
+  horizon_start: string
+  horizon_end: string
+  total_energy_cost: number | null
+  total_energy_kwh: number | null
+  peak_demand_kw: number | null
+  entries: EntryInput[]
+}
+
+/**
+ * Inserts all draft schedules and their entries together. The corresponding
+ * successful optimization result is intentionally already persisted.
+ */
+export function persistOptimizationSchedules(
+  db: SqliteDatabase,
+  factoryId: string,
+  requestId: string,
+  resultId: string,
+  adapter: string,
+  payload: unknown,
+): OfflineWriteResult {
+  const schedules = Array.isArray(payload) ? payload as OptimizationScheduleInput[] : []
+
+  const run = db.transaction((): Row => {
+    const factory = db.prepare('SELECT id FROM factories WHERE id = ?').get(factoryId)
+    const request = db.prepare(
+      'SELECT id, factory_id, status, adapter_metadata FROM optimization_requests WHERE id = ?',
+    ).get(requestId) as Row | undefined
+    const result = db.prepare(
+      'SELECT id, factory_id, optimization_request_id, status FROM optimization_results WHERE id = ?',
+    ).get(resultId) as Row | undefined
+    if (
+      !factory ||
+      !request || request.factory_id !== factoryId || request.status !== 'running' ||
+      !result || result.factory_id !== factoryId || result.optimization_request_id !== requestId || result.status !== 'succeeded' ||
+      schedules.length < 1 || schedules.length > 2
+    ) {
+      throw new Error('optimization persistence references are invalid')
+    }
+
+    const kinds = new Set<string>()
+    const created: Row[] = []
+    for (const spec of schedules) {
+      if (
+        (spec.kind !== 'baseline' && spec.kind !== 'optimized') ||
+        kinds.has(spec.kind) ||
+        !Array.isArray(spec.entries) ||
+        spec.entries.length === 0
+      ) {
+        throw new Error('optimization schedule payload is invalid')
+      }
+      kinds.add(spec.kind)
+
+      const name = spec.kind === 'baseline' ? 'Optimizer baseline' : 'Optimizer optimized'
+      const current = db.prepare(
+        'SELECT MAX(version) AS version FROM schedules WHERE factory_id = ? AND name = ?',
+      ).get(factoryId, name) as { version: number | null }
+      const version = (current.version ?? 0) + 1
+      const scheduleId = crypto.randomUUID()
+      db.prepare(`
+        INSERT INTO schedules (
+          id, factory_id, name, version, status, horizon_start, horizon_end,
+          optimization_request_id, optimization_result_id, total_energy_cost,
+          total_energy_kwh, peak_demand_kw, metadata
+        ) VALUES (?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        scheduleId,
+        factoryId,
+        name,
+        version,
+        spec.horizon_start,
+        spec.horizon_end,
+        requestId,
+        resultId,
+        spec.total_energy_cost,
+        spec.total_energy_kwh,
+        spec.peak_demand_kw,
+        JSON.stringify({ kind: spec.kind }),
+      )
+      const entryRows = insertEntries(db, scheduleId, spec.entries)
+      const scheduleRow = db.prepare('SELECT * FROM schedules WHERE id = ?').get(scheduleId) as Row
+      created.push({
+        schedule: decodeRpcRow('schedules', scheduleRow),
+        entries: orderRows(entryRows).map((entryRow) => decodeRpcRow('schedule_entries', entryRow)),
+      })
+    }
+
+    if (!kinds.has('optimized')) throw new Error('optimized schedule is required')
+    const existingMetadata = request.adapter_metadata
+      ? JSON.parse(String(request.adapter_metadata)) as Row
+      : {}
+    db.prepare(`
+      UPDATE optimization_requests
+         SET status = 'succeeded', error_message = NULL, adapter_metadata = ?
+       WHERE id = ? AND factory_id = ?
+    `).run(
+      JSON.stringify({
+        ...existingMetadata,
+        adapter,
+        optimization_result_id: resultId,
+        schedule_persistence_status: 'succeeded',
+        schedule_ids: created.map((item) => (item.schedule as Row).id),
+      }),
+      requestId,
+      factoryId,
+    )
+    const updatedRequest = db.prepare(
+      'SELECT * FROM optimization_requests WHERE id = ? AND factory_id = ?',
+    ).get(requestId, factoryId) as Row
+    return {
+      request: decodeRpcRow('optimization_requests', updatedRequest),
+      schedules: created,
+    }
+  })
+
+  try {
+    return { data: run(), error: null, count: schedules.length }
+  } catch (error) {
+    return { data: null, error: offlineEntryError(error), count: null }
+  }
+}
+
+interface BuilderMachineInput {
+  slug: string
+  name: string
+  type: string
+  rated_power_kw: number
+  is_active: boolean
+}
+
+interface BuilderProcessInput {
+  slug: string
+  name: string
+  machine_slug: string
+  duration_minutes: number
+  is_active: boolean
+}
+
+function jsonObject(value: unknown): Row {
+  if (typeof value !== 'string') return {}
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? parsed as Row
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Persists a factory model and its Builder-owned child rows atomically. */
+export function saveFactoryBuilder(
+  db: SqliteDatabase,
+  factoryId: string | null,
+  factory: Row,
+  machines: BuilderMachineInput[],
+  processes: BuilderProcessInput[],
+): OfflineWriteResult {
+  const run = db.transaction((): Row => {
+    const now = new Date().toISOString()
+    let savedFactoryId = factoryId
+    if (savedFactoryId) {
+      const existing = db.prepare('SELECT config, metadata FROM factories WHERE id = ?')
+        .get(savedFactoryId) as Row | undefined
+      if (!existing) throw new Error(`factory ${savedFactoryId} does not exist`)
+      const config = jsonObject(existing.config)
+      config.builder = {
+        industry: factory.industry,
+        working_hours_per_day: factory.working_hours_per_day,
+        solar_capacity_kw: factory.solar_capacity_kw,
+      }
+      const metadata = jsonObject(existing.metadata)
+      metadata.managed_by = 'factory_builder'
+      db.prepare(`
+        UPDATE factories
+           SET name = ?, description = ?, currency = ?, config = ?, metadata = ?
+         WHERE id = ?
+      `).run(factory.name, factory.industry, factory.currency, JSON.stringify(config), JSON.stringify(metadata), savedFactoryId)
+    } else {
+      savedFactoryId = crypto.randomUUID()
+      db.prepare(`
+        INSERT INTO factories
+          (id, slug, name, description, timezone, currency, config, metadata, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'UTC', ?, ?, ?, 1, ?, ?)
+      `).run(
+        savedFactoryId,
+        factory.slug,
+        factory.name,
+        factory.industry,
+        factory.currency,
+        JSON.stringify({
+          builder: {
+            industry: factory.industry,
+            working_hours_per_day: factory.working_hours_per_day,
+            solar_capacity_kw: factory.solar_capacity_kw,
+          },
+        }),
+        JSON.stringify({ managed_by: 'factory_builder' }),
+        now,
+        now,
+      )
+    }
+
+    const machineIds = new Map<string, string>()
+    const machineRows: Row[] = []
+    for (const machine of machines) {
+      db.prepare(`
+        INSERT INTO machines
+          (id, factory_id, slug, name, type, rated_power_kw, availability, metadata, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, ?)
+        ON CONFLICT(factory_id, slug) DO UPDATE SET
+          name = excluded.name,
+          type = excluded.type,
+          rated_power_kw = excluded.rated_power_kw,
+          metadata = json_patch(machines.metadata, excluded.metadata),
+          is_active = excluded.is_active
+      `).run(
+        crypto.randomUUID(), savedFactoryId, machine.slug, machine.name, machine.type,
+        machine.rated_power_kw, JSON.stringify({ managed_by: 'factory_builder' }),
+        machine.is_active ? 1 : 0, now, now,
+      )
+      const row = db.prepare('SELECT * FROM machines WHERE factory_id = ? AND slug = ?')
+        .get(savedFactoryId, machine.slug) as Row
+      machineIds.set(machine.slug, String(row.id))
+      machineRows.push(decodeRpcRow('machines', row))
+    }
+
+    const machineSlugs = machines.map((machine) => machine.slug)
+    db.prepare(`UPDATE machines SET is_active = 0 WHERE factory_id = ? AND slug NOT IN (${machineSlugs.map(() => '?').join(', ')})`)
+      .run(savedFactoryId, ...machineSlugs)
+
+    const processRows: Row[] = []
+    for (const process of processes) {
+      const machineId = machineIds.get(process.machine_slug)
+      const machine = machines.find((candidate) => candidate.slug === process.machine_slug)
+      if (!machineId || !machine || (process.is_active && !machine.is_active)) {
+        throw new Error('active process references an unavailable factory machine')
+      }
+      db.prepare(`
+        INSERT INTO processes
+          (id, factory_id, slug, name, duration_minutes, machine_id, power_requirement_kw, metadata, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(factory_id, slug) DO UPDATE SET
+          name = excluded.name,
+          duration_minutes = excluded.duration_minutes,
+          machine_id = excluded.machine_id,
+          power_requirement_kw = excluded.power_requirement_kw,
+          metadata = json_patch(processes.metadata, excluded.metadata),
+          is_active = excluded.is_active
+      `).run(
+        crypto.randomUUID(), savedFactoryId, process.slug, process.name,
+        process.duration_minutes, machineId, machine.rated_power_kw,
+        JSON.stringify({ managed_by: 'factory_builder' }), process.is_active ? 1 : 0, now, now,
+      )
+      const row = db.prepare('SELECT * FROM processes WHERE factory_id = ? AND slug = ?')
+        .get(savedFactoryId, process.slug) as Row
+      processRows.push(decodeRpcRow('processes', row))
+    }
+
+    const processSlugs = processes.map((process) => process.slug)
+    db.prepare(`UPDATE processes SET is_active = 0 WHERE factory_id = ? AND slug NOT IN (${processSlugs.map(() => '?').join(', ')})`)
+      .run(savedFactoryId, ...processSlugs)
+
+    const tariffs = [
+      ['builder-off-peak-early', 'Builder off-peak', '00:00', '18:00', factory.off_peak_tariff, 10],
+      ['builder-peak', 'Builder peak', '18:00', '22:00', factory.peak_tariff, 20],
+      ['builder-off-peak-late', 'Builder off-peak', '22:00', '23:59', factory.off_peak_tariff, 10],
+    ] as const
+    for (const [slug, name, start, end, price, priority] of tariffs) {
+      db.prepare(`
+        INSERT INTO electricity_tariffs
+          (id, factory_id, slug, name, currency, start_time, end_time, energy_price_per_kwh, priority, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(factory_id, slug) DO UPDATE SET
+          name = excluded.name, currency = excluded.currency,
+          start_time = excluded.start_time, end_time = excluded.end_time,
+          energy_price_per_kwh = excluded.energy_price_per_kwh,
+          priority = excluded.priority,
+          metadata = json_patch(electricity_tariffs.metadata, excluded.metadata)
+      `).run(
+        crypto.randomUUID(), savedFactoryId, slug, name, factory.currency, start, end, price, priority,
+        JSON.stringify({ managed_by: 'factory_builder' }), now, now,
+      )
+    }
+
+    const savedFactory = decodeRpcRow(
+      'factories',
+      db.prepare('SELECT * FROM factories WHERE id = ?').get(savedFactoryId) as Row,
+    )
+    return { factory_id: savedFactoryId, factory: savedFactory, machines: machineRows, processes: processRows }
+  })
+
+  try {
+    return { data: run(), error: null, count: 1 }
+  } catch (error) {
+    return { data: null, error: offlineEntryError(error), count: null }
+  }
+}
+
 /**
  * Dispatches an RPC name to its offline implementation.
  *
@@ -343,7 +659,7 @@ export function appendScheduleEntries(
  */
 export function offlineRpc(
   name: string,
-  args: { p_schedule_id?: unknown; p_entries?: unknown; p_patch?: unknown } = {},
+  args: Record<string, unknown> = {},
   db: SqliteDatabase = getDb(),
 ): OfflineWriteResult {
   // Aggregates are a different concern in a different module; try them first so
@@ -358,6 +674,23 @@ export function offlineRpc(
       return replaceScheduleEntries(db, scheduleId, args.p_entries, args.p_patch)
     case 'append_schedule_entries':
       return appendScheduleEntries(db, scheduleId, args.p_entries, args.p_patch)
+    case 'persist_optimization_schedules':
+      return persistOptimizationSchedules(
+        db,
+        typeof args.p_factory_id === 'string' ? args.p_factory_id : '',
+        typeof args.p_optimization_request_id === 'string' ? args.p_optimization_request_id : '',
+        typeof args.p_optimization_result_id === 'string' ? args.p_optimization_result_id : '',
+        typeof args.p_adapter === 'string' ? args.p_adapter : '',
+        args.p_schedules,
+      )
+    case 'save_factory_builder':
+      return saveFactoryBuilder(
+        db,
+        typeof args.p_factory_id === 'string' ? args.p_factory_id : null,
+        (args.p_factory ?? {}) as Row,
+        (Array.isArray(args.p_machines) ? args.p_machines : []) as BuilderMachineInput[],
+        (Array.isArray(args.p_processes) ? args.p_processes : []) as BuilderProcessInput[],
+      )
     default:
       return {
         data: null,

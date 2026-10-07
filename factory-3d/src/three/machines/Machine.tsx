@@ -122,7 +122,7 @@ function buildMachine(id: MachineId) {
   return { group, overlay, kit, anims, ringMat, selMat, sel, lampMat, maint, runtime, collider };
 }
 
-export function Machine({ id }: { id: MachineId }) {
+function MachineGeometry({ id }: { id: MachineId }) {
   const m = useMemo(() => buildMachine(id), [id]);
 
   useEffect(() => {
@@ -142,7 +142,13 @@ export function Machine({ id }: { id: MachineId }) {
     const dt = Math.min(delta, 0.05);
     const t = state.clock.elapsedTime;
     const data = useMachineStore.getState().machines[id];
-    if (!data) return;
+    if (!data) {
+      m.group.visible = false;
+      m.overlay.visible = false;
+      return;
+    }
+    m.group.visible = true;
+    m.overlay.visible = true;
     const { hoveredId, selectedId } = useViewStore.getState();
 
     // Status visuals, only when the status changes.
@@ -201,4 +207,16 @@ export function Machine({ id }: { id: MachineId }) {
       <primitive object={m.overlay} />
     </>
   );
+}
+
+export function Machine({
+  id,
+  hideUnmapped = false,
+}: {
+  id: MachineId;
+  hideUnmapped?: boolean;
+}) {
+  const mapped = useMachineStore((state) => Boolean(state.machines[id]));
+  if (hideUnmapped && !mapped) return null;
+  return <MachineGeometry id={id} />;
 }

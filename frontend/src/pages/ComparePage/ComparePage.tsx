@@ -1,82 +1,38 @@
 import Card from '../../components/Card/Card'
-import CompareCard from '../../components/CompareCard/CompareCard'
-import GanttRow from '../../components/GanttRow/GanttRow'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import { useFactory } from '../../context/useFactory'
-import styles from './ComparePage.module.css'
-
-const HOURS = Array.from({ length: 25 }, (_, index) => index)
+import { displayValue, findStoredSchedule } from '../../data/backendView'
 
 export default function ComparePage() {
-  const { factory } = useFactory()
+  const { backendData, loading, error } = useFactory()
+  if (!backendData) return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
+  const baseline = findStoredSchedule(backendData, 'baseline')
+  const optimized = findStoredSchedule(backendData, 'optimized')
 
   return (
-    <div className={styles.page}>
-      <PageHeader eyebrow={factory.name} title="Baseline vs optimized" />
-
-      <CompareCard compare={factory.compare} />
-
-      <Card title="Schedule timelines">
-        <div className={styles.timelineScroller}>
-          <div className={styles.timelineInner}>
-            <div className={styles.timeAxis} aria-hidden="true">
-              {HOURS.map((hour) => (
-                <span key={hour}>{hour % 3 === 0 ? `${hour}:00` : ''}</span>
-              ))}
-            </div>
-            <GanttRow
-              label="Baseline"
-              blocks={factory.baselineSchedule}
-              autoLanes
-            />
-            <GanttRow
-              label="Optimized"
-              blocks={factory.optimizedSchedule}
-              autoLanes
-            />
+    <>
+      <PageHeader eyebrow={backendData.factory.name} title="Baseline vs optimized" />
+      {baseline && optimized ? (
+        <Card title="Persisted schedule comparison">
+          <p>Both schedules are persisted Backend outputs. Costs exclude any charges not represented by their stored schedule totals.</p>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead><tr><th>Metric</th><th>Baseline schedule</th><th>Optimized schedule</th></tr></thead>
+              <tbody>
+                <tr><th>Schedule UUID</th><td><code>{baseline.id}</code></td><td><code>{optimized.id}</code></td></tr>
+                <tr><th>Status</th><td>{baseline.status}</td><td>{optimized.status}</td></tr>
+                <tr><th>Total energy</th><td>{displayValue(baseline.totalEnergyKwh, ' kWh')}</td><td>{displayValue(optimized.totalEnergyKwh, ' kWh')}</td></tr>
+                <tr><th>Total stored energy cost</th><td>{displayValue(baseline.totalEnergyCost, ` ${backendData.factory.currency}`)}</td><td>{displayValue(optimized.totalEnergyCost, ` ${backendData.factory.currency}`)}</td></tr>
+                <tr><th>Schedule entries</th><td>{baseline.entries.length}</td><td>{optimized.entries.length}</td></tr>
+              </tbody>
+            </table>
           </div>
-        </div>
-      </Card>
-
-      <Card title="Shifted processes">
-        <div className={styles.tableScroller}>
-          <table className={styles.shiftTable}>
-            <caption className={styles.visuallyHidden}>
-              Processes shifted by the optimizer, their schedule changes, reason,
-              and energy cost savings
-            </caption>
-            <thead>
-              <tr>
-                <th scope="col">Process</th>
-                <th scope="col">Machine</th>
-                <th scope="col">Was</th>
-                <th scope="col">Now</th>
-                <th scope="col">Reason</th>
-                <th scope="col">Saved</th>
-              </tr>
-            </thead>
-            <tbody>
-              {factory.shifted.map((shift) => (
-                <tr key={`${shift.process}-${shift.machine}`}>
-                  <th scope="row">{shift.process}</th>
-                  <td>{shift.machine}</td>
-                  <td>{shift.was}</td>
-                  <td>{shift.now}</td>
-                  <td>{shift.reason}</td>
-                  <td>{shift.saved}</td>
-                </tr>
-              ))}
-              {factory.shifted.length === 0 && (
-                <tr>
-                  <td className={styles.noShifts} colSpan={6}>
-                    No processes were shifted for this factory.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
+        </Card>
+      ) : (
+        <Card title="Persisted schedules unavailable">
+          <p>A baseline and optimized schedule pair was not found by its stored name or metadata. No comparison values are generated.</p>
+        </Card>
+      )}
+    </>
   )
 }

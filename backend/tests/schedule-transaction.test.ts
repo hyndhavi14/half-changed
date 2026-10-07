@@ -40,9 +40,14 @@ import { offlineRpc, replaceScheduleEntries } from '@/lib/offline/writes'
 
 import {
   computeTotals,
+  persistOptimizationSchedules,
   scheduleEntriesRepository,
   schedulesRepository,
 } from '@/lib/repositories/schedules'
+import {
+  optimizationRequestsRepository,
+  optimizationResultsRepository,
+} from '@/lib/repositories/optimization'
 import { mapDatabaseError } from '@/lib/http'
 import { scheduleEntryBulkSchema } from '@/lib/schemas/schedules'
 import type { SqliteDatabase } from '@/lib/offline/db'
@@ -556,6 +561,148 @@ describe('the entries bulk schema', () => {
     const parsed = scheduleEntryBulkSchema.parse({ entries: [entry()] })
     expect(parsed.entries).toHaveLength(1)
     expect(parsed.schedule).toBeUndefined()
+  })
+
+  describe('optimizer result schedule persistence', () => {
+    async function createSuccessfulResult() {
+      const createdRequest = await optimizationRequestsRepository.create(factoryId, {
+        reference: `phase3-${crypto.randomUUID()}`,
+        horizon_start: T0,
+        horizon_end: T3,
+        objective: {},
+        constraints: {},
+        status: 'running',
+        created_by: null,
+        error_message: null,
+        adapter_metadata: { adapter: 'test' },
+        request_payload: { canonical: true },
+      })
+      const request = await optimizationRequestsRepository.update(factoryId, createdRequest.id, {
+        status: 'running',
+      })
+      const raw = { api_version: '2.0', status: 'OPTIMAL', result: { preserved: true } }
+      const result = await optimizationResultsRepository.create(factoryId, {
+        optimization_request_id: request.id,
+        status: 'succeeded',
+        solution: raw,
+        metrics: { optimizer_status: 'OPTIMAL' },
+      })
+      return { request, result, raw }
+    }
+
+    function scheduleSpec(kind: 'baseline' | 'optimized', machine = machineId) {
+      return {
+        kind,
+        horizon_start: T0,
+        horizon_end: T3,
+        total_energy_cost: 10,
+        total_energy_kwh: 100,
+        peak_demand_kw: 100,
+        entries: [{
+          machine_id: machine,
+          process_id: processId,
+          production_order_id: null,
+          starts_at: T0,
+          ends_at: T1,
+          power_kw: 100,
+          energy_kwh: 100,
+          cost: 10,
+          quantity: 20,
+          sequence: 0,
+          metadata: { planned: true },
+        }],
+      }
+    }
+
+    it('creates linked baseline and optimized draft schedules and entries with canonical IDs', async () => {
+      const { request, result } = await createSuccessfulResult()
+      const persisted = await persistOptimizationSchedules(
+        factoryId,
+        request.id,
+        result.id,
+        'test-adapter',
+        [scheduleSpec('baseline'), scheduleSpec('optimized')],
+      )
+
+      expect(persisted.request.status).toBe('succeeded')
+      expect(persisted.request.adapter_metadata).toMatchObject({
+        optimization_result_id: result.id,
+        schedule_persistence_status: 'succeeded',
+      })
+      expect(persisted.schedules).toHaveLength(2)
+      expect(persisted.schedules.map(({ schedule }) => schedule.metadata.kind)).toEqual(['baseline', 'optimized'])
+      for (const { schedule, entries, computed_totals } of persisted.schedules) {
+        expect(schedule.status).toBe('draft')
+        expect(schedule.factory_id).toBe(factoryId)
+        expect(schedule.optimization_request_id).toBe(request.id)
+        expect(schedule.optimization_result_id).toBe(result.id)
+        expect(entries).toHaveLength(1)
+        expect(entries[0]).toMatchObject({
+          machine_id: machineId,
+          process_id: processId,
+          production_order_id: null,
+          schedule_id: schedule.id,
+        })
+        expect(computed_totals).toMatchObject({
+          total_energy_kwh: 100,
+          total_energy_cost: 10,
+          peak_demand_kw: 100,
+          duration_minutes: 60,
+        })
+      }
+      expect(new Set(persisted.schedules.map(({ schedule }) => schedule.id)).size).toBe(2)
+    })
+
+    it('rolls back every schedule and entry if a later schedule entry violates a foreign key', async () => {
+      const { request, result, raw } = await createSuccessfulResult()
+
+      await expect(persistOptimizationSchedules(
+        factoryId,
+        request.id,
+        result.id,
+        'test-adapter',
+        [scheduleSpec('baseline'), scheduleSpec('optimized', MISSING_UUID)],
+      )).rejects.toThrow()
+
+      const schedules = await schedulesRepository.list(factoryId, { limit: 100, offset: 0 })
+      expect(schedules.rows.filter((schedule) => schedule.optimization_request_id === request.id)).toEqual([])
+      const storedRequest = await optimizationRequestsRepository.getById(factoryId, request.id)
+      expect(storedRequest?.status).toBe('running')
+      const storedResult = await optimizationResultsRepository.getById(factoryId, result.id)
+      expect(storedResult?.solution).toEqual(raw)
+      expect(db.prepare(`
+        SELECT COUNT(*) AS c
+          FROM schedule_entries
+         WHERE schedule_id IN (
+           SELECT id FROM schedules WHERE optimization_request_id = ?
+         )
+      `).get(request.id)).toMatchObject({ c: 0 })
+    })
+
+    it('allocates later versions without replacing earlier schedules', async () => {
+      const first = await createSuccessfulResult()
+      const firstPersisted = await persistOptimizationSchedules(
+        factoryId,
+        first.request.id,
+        first.result.id,
+        'test-adapter',
+        [scheduleSpec('optimized')],
+      )
+      const second = await createSuccessfulResult()
+      const secondPersisted = await persistOptimizationSchedules(
+        factoryId,
+        second.request.id,
+        second.result.id,
+        'test-adapter',
+        [scheduleSpec('optimized')],
+      )
+
+      const firstVersion = firstPersisted.schedules[0]?.schedule.version ?? 0
+      expect(firstVersion).toBeGreaterThan(0)
+      expect(secondPersisted.schedules[0]?.schedule.version).toBe(firstVersion + 1)
+      expect(await scheduleEntriesRepository.count(firstPersisted.schedules[0]!.schedule.id)).toBe(1)
+      expect(await scheduleEntriesRepository.count(secondPersisted.schedules[0]!.schedule.id)).toBe(1)
+    })
   })
 
   it('accepts an optional schedule patch', () => {

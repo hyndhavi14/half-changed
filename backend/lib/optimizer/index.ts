@@ -4,6 +4,9 @@
 
 export * from './contract'
 export * from './payload'
+export * from './pythonPayload'
+export * from './pythonResponse'
+export * from './scheduleMapping'
 export {
   HttpOptimizerTransport,
   UnconfiguredOptimizerTransport,
@@ -15,3 +18,4 @@ export {
   solve,
   type OptimizerConfig,
 } from './client'
+export { PythonSubprocessOptimizerTransport } from './pythonSubprocess'

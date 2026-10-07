@@ -4,13 +4,17 @@ An interactive 3D model of the ByteMe chocolate plant (11 machines, conveyors, p
 
 **Stack:** React 19 · TypeScript · Vite · three r170 · @react-three/fiber 9 · @react-three/drei 10 · zustand 5
 
-```bash
+```powershell
 npm install
-npm run dev        # http://localhost:5173
+npm run dev        # http://localhost:5174 (strict port)
 npm run build      # type-check + production bundle in dist/
 ```
 
-Dev extras: open with `?perf` for the r3f-perf overlay, `?q=low` for 1x pixel ratio and 1024 shadows. In the console, `__byteme.machineStore.getState()` shows the 11 machines.
+The development server proxies `/api` to the backend at `http://localhost:3000`.
+Set `VITE_API_URL` only when using a different backend origin; it may be either
+the origin or the complete `/api/v1` base path.
+
+Dev extras: open with `?perf` for the r3f-perf overlay, `?q=low` for 1x pixel ratio and 1024 shadows. Open with `?demo=true` to explicitly use the 11-machine mock fixture; in that mode, `__byteme.machineStore.getState()` shows the fixture.
 
 ## Mounting it in the ByteMe frontend
 
@@ -32,7 +36,56 @@ const provider = new MockMachineDataProvider();   // create once, keep stable
 
 `FactoryTwin` fills its parent. Its CSS is scoped under `.bm-twin`, so it won't leak into the host page. Load the two brand fonts in the host page (see `index.html`):  Fraunces (headings) and Atkinson Hyperlegible (UI).
 
-Going live: swap in `new ApiMachineDataProvider({ baseUrl: '/api', pollMs: 10000 })`. It reads `GET {baseUrl}/machines` (an array, or `{ machines: [...] }`) and maps it through `mapMachine()` in `src/data/providers/ApiMachineDataProvider.ts`; adjust that one function once the optimizer's JSON is final.
+The API provider is also available when embedding the twin in another host.
+For the Phase 6 separately served application, configure ignored local
+`factory-3d/.env.local` with `VITE_SUPABASE_URL` and the browser-safe
+`VITE_SUPABASE_PUBLISHABLE_KEY`. Open Factory-3D with canonical `factoryId`
+and `scheduleId` UUIDs, then sign in normally with Supabase Auth. The
+user-session access token is sent only in Backend `Authorization` headers;
+passwords and tokens are never put in the launcher URL or source-controlled
+environment files. Never use a secret/service-role key in this application.
+
+```ts
+new ApiMachineDataProvider({
+  baseUrl: 'http://localhost:3000/api/v1',
+  factoryId: '<backend factory UUID>',
+  scheduleId: '<backend schedule UUID>',
+  headers: { Authorization: `Bearer ${accessToken}` },
+  pollMs: 10000,
+  onError: (error) => console.error(error),
+})
+```
+
+If opened directly, backend mode requires both `factoryId` and `scheduleId`
+UUID query parameters. The mock scene is available only by explicitly opening
+`?demo=true`; it is never used as a fallback after an API error.
+
+Factory-3D reads the backend's enveloped, factory-scoped machine collection
+and selected schedule-with-entries endpoint. Machine UUIDs stay canonical;
+only the fixed slug crosswalk chooses a scene geometry key. Machine state,
+current power and solar output remain **Not reported** because the backend
+provides no live telemetry. Schedule entries retain their UUIDs and exact
+offset-aware timestamps and are labeled as planned intervals; schedule status
+is not machine status. API mode disables simulation, debug state editing and
+demo product animation. Scene geometries without a backend slug mapping are
+hidden and listed as unplaced; no backend machines are fabricated to fill the
+11-position scene.
+
+The backend Chocolate seed currently has six production-machine slugs and a
+PV asset, while the 3D scene has eleven fixed layout machines. The explicit
+crosswalk currently places the six matching production assets only; the PV
+asset and unmatched scene positions remain unplaced. Full scene/seed parity is
+not claimed.
+
+## Public SolarShift historical replay
+
+Open `http://localhost:5174/?scenario=hgd` or `?scenario=lgd` to load the
+approved historical scenario without sign-in. The optional
+`&schedule=baseline` selects its persisted baseline; the default is the
+persisted SolarShift optimized schedule. Data comes from the Backend's
+allowlisted public read-only endpoint, not browser-side Supabase table access.
+The replay distinguishes NASA historical resource from modeled PV, solar
+allocation, and grid energy; none is presented as measured telemetry.
 
 ## Architecture
 
@@ -52,7 +105,7 @@ src/
   app/           dev shell only
   config/        palette, layout (11 machines, flow path), camera presets, status styles
   data/          types, mock data + descriptions, providers, useDataSync, live simulation
-  state/         machineStore, viewStore, energyStore (+ energyNow)
+  state/         machineStore, scheduleStore, viewStore, energyStore (+ energyNow)
   three/
     core/        canvas textures, useBuilt, mergeStatic
     scene/       FactoryScene, Lighting, applyEnvIntensity

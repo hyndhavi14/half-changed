@@ -29,7 +29,15 @@ const Perf =
     : null;
 
 /** Everything inside the <Canvas>. */
-export function FactoryScene({ initialView }: { initialView: PresetKey }) {
+export function FactoryScene({
+  initialView,
+  showDemoProducts = true,
+  hideUnmappedMachines = false,
+}: {
+  initialView: PresetKey;
+  showDemoProducts?: boolean;
+  hideUnmappedMachines?: boolean;
+}) {
   const scene = useThree((s) => s.scene);
   const loaded = useMachineStore((s) => s.loaded);
 
@@ -53,10 +61,10 @@ export function FactoryScene({ initialView }: { initialView: PresetKey }) {
       <Outside />
 
       {LAYOUT.map((d) => (
-        <Machine key={d.id} id={d.id} />
+        <Machine key={d.id} id={d.id} hideUnmapped={hideUnmappedMachines} />
       ))}
       <Conveyors />
-      <Products />
+      {showDemoProducts && <Products />}
       <EnergyFlow />
 
       <Picker />

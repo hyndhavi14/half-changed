@@ -4,8 +4,8 @@ import { STATUS, STATUS_ORDER, statusCss } from '../../config/statusStyles';
 /** Solar / grid / factory load bars, scaled to the largest value, plus the status legend. */
 export function EnergyPanel() {
   const e = useEnergyNow();
-  const max = Math.max(e.load, e.solar, 1);
-  const rows: [string, number, string][] = [
+  const max = Math.max(e.load ?? 0, e.solar ?? 0, 1);
+  const rows: [string, number | null, string][] = [
     ['Solar', e.solar, '#E3A72F'],
     ['Grid', e.grid, '#8A6E58'],
     ['Factory', e.load, 'var(--accent)'],
@@ -17,9 +17,9 @@ export function EnergyPanel() {
         <div className="erow" key={label}>
           <span>{label}</span>
           <div className="ebar">
-            <i style={{ background: color, width: `${(kw / max) * 100}%` }} />
+            <i style={{ background: color, width: `${((kw ?? 0) / max) * 100}%` }} />
           </div>
-          <b>{kw} kW</b>
+          <b>{kw === null ? '—' : `${kw} kW`}</b>
         </div>
       ))}
       <ul className="legend" aria-label="Machine status colours">

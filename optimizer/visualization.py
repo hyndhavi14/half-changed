@@ -12,9 +12,16 @@ DEMO/SIMULATED.
 - render_energy_comparison: energy/cost bars, baseline vs optimized
 """
 
-from optimizer.models import TIME_SCALE
+from optimizer.models import TIME_SCALE, schedule_time_to_minute_count
 
 BAR_WIDTH = 48  # character columns spanning the planning horizon
+
+
+def _minute_tick(hours):
+    minutes = schedule_time_to_minute_count(hours)
+    if minutes is None:
+        raise ValueError("schedule visualization requires exact whole-minute times")
+    return minutes
 
 
 def render_gantt(schedule, title="SCHEDULE"):
@@ -24,28 +31,34 @@ def render_gantt(schedule, title="SCHEDULE"):
     Each row shows: process name, machine, start-end, duration, flexible
     status, and a timeline bar positioned across the planning horizon.
     """
-    horizon = max(p["end_time"] for p in schedule["processes"])
     print("=" * 100)
     print(f"{title} - {schedule.get('factory_name', 'Factory')}")
     print(f"Status: {schedule['status']}   Makespan: {schedule['makespan']:.2f} h")
     print("=" * 100)
 
-    # Timeline ruler: one character per 30 minutes, hour labels under it
-    ruler_chars = int(horizon * 2)
+    # The graphic aggregates minutes into half-hour display bins; labels
+    # retain the exact schedule times.
+    horizon_minutes = max(
+        _minute_tick(process["end_time"])
+        for process in schedule["processes"]
+    )
+    ruler_chars = (horizon_minutes + 29) // 30
     ruler = "".join(
         str(hour % 10) if half == 0 else "."
         for half in range(ruler_chars)
         for hour in [half // 2]
     )
     print(f"{'Process':<24} {'Machine':<18} {'Start':>5} {'End':>5} "
-          f"{'Dur':>4}  {'Flex':<4} Timeline (each char = 30 min, ruler = hours)")
+          f"{'Dur':>5}  {'Flex':<4} Timeline (each char = 30 min, ruler = hours)")
     print(f"{'':<24} {'':<18} {'':>5} {'':>5} {'':>4}  {'':<4} {ruler}")
     print("-" * 100)
 
     for p in schedule["processes"]:
         # Timeline bar
-        start_col = int(round(p["start_time"] * 2))
-        end_col = max(int(round(p["end_time"] * 2)), start_col + 1)
+        start_minutes = _minute_tick(p["start_time"])
+        end_minutes = _minute_tick(p["end_time"])
+        start_col = start_minutes // 30
+        end_col = max((end_minutes + 29) // 30, start_col + 1)
         bar = ["."] * ruler_chars
         for col in range(start_col, min(end_col, ruler_chars)):
             bar[col] = "#" if p["is_flexible"] else "="
@@ -53,8 +66,10 @@ def render_gantt(schedule, title="SCHEDULE"):
         print(
             f"{p['process_name'][:23]:<24} "
             f"{(p.get('machine_id') or '-')[:17]:<18} "
-            f"{p['start_time']:>5.1f} {p['end_time']:>5.1f} "
-            f"{p['end_time'] - p['start_time']:>4.1f}  {flex:<4} "
+            f"{start_minutes // 60:>2}:{start_minutes % 60:02} "
+            f"{end_minutes // 60:>2}:{end_minutes % 60:02} "
+            f"{(end_minutes - start_minutes) // 60:>2}:"
+            f"{(end_minutes - start_minutes) % 60:02}  {flex:<4} "
             f"{''.join(bar)}"
         )
 
@@ -89,13 +104,16 @@ def render_energy_profile(solar_profile, schedule, title="ENERGY PROFILE"):
         include_grid_by_slot=True,
     )
 
-    # Aggregate the exact half-hour grid allocation into displayed hours.
+    # Aggregate the exact minute-grid allocation into displayed hours.
     grid_by_hour = {h: 0.0 for h in range(horizon + 1)}
     for slot, grid_kwh in grid_by_slot.items():
         grid_by_hour[slot // TIME_SCALE] += grid_kwh
 
+    from optimizer.models import energy_profile_value
+
     scale = max(max(grid_by_hour.values()), max(
-        solar_profile.get(h % 24, 0) for h in range(horizon + 1)
+        energy_profile_value(solar_profile, h)
+        for h in range(horizon + 1)
     ), 1.0)
 
     print("=" * 100)
@@ -104,7 +122,7 @@ def render_energy_profile(solar_profile, schedule, title="ENERGY PROFILE"):
     print(f"{'Hour':<6} {'Solar kW':>9}  {'Solar':<34} {'Grid kWh':>9}  {'Grid':<34}")
     print("-" * 100)
     for hour in range(horizon + 1):
-        solar_kw = solar_profile.get(hour % 24, 0)
+        solar_kw = energy_profile_value(solar_profile, hour)
         grid = grid_by_hour[hour]
         solar_bar = "#" * int(round(solar_kw / scale * 32))
         grid_bar = "#" * int(round(grid / scale * 32))

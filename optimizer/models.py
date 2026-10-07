@@ -14,7 +14,8 @@ All data handled here is DEMO/SIMULATED data only.
 
 import math
 
-TIME_SCALE = 2  # 1 scheduling unit = 0.5 hours (half-hour precision)
+TIME_SCALE = 60  # 1 scheduling unit = 1 minute
+HORIZON_SCALE = 2  # Planning bounds retain their existing half-hour semantics.
 MAX_CP_SAT_INTEGER = (1 << 63) - 1
 
 # ---------------------------------------------------------------------------
@@ -22,26 +23,65 @@ MAX_CP_SAT_INTEGER = (1 << 63) - 1
 #
 # The engine encodes cost/solar contributions as integers:
 #   cost units  = power_kw * tariff * duration_hours * COST_SCALE(1000)
-#   solar units = min(solar_kw, power_kw) * duration_hours * SOLAR_SCALE(10)
+#   solar units = min(solar_kw, power_kw) * duration_hours * SOLAR_SCALE(600)
 # and stores each process's contribution in a variable of finite domain.
 # Values beyond these bounds cannot be represented and would otherwise
 # surface as an unexplained INFEASIBLE result - the input layer therefore
 # rejects them upfront with a clear error naming the offending process.
 # ---------------------------------------------------------------------------
 COST_SCALE = 1000          # cost resolution: 0.001 currency units
-SOLAR_SCALE = 10           # in-model solar resolution: 0.1 kWh
+SOLAR_SCALE = 600          # in-model solar resolution: 1/600 kWh (0.1 kW-minute)
+SOLAR_POWER_SCALE = 10     # input solar power resolution: 0.1 kW
 COST_DOMAIN_LIMIT = 100_000_000     # per-process cost variable domain
-SOLAR_DOMAIN_LIMIT = 1_000_000      # per-process solar variable domain
+SOLAR_DOMAIN_LIMIT = 60_000_000     # per-process solar variable domain
 
 
 def time_to_grid_floor(hours):
-    """Return the greatest half-hour tick not later than ``hours``."""
-    return int(math.floor(hours * TIME_SCALE + 1e-9))
+    """Return the greatest existing half-hour planning tick, in minutes."""
+    return int(math.floor(hours * HORIZON_SCALE + 1e-9)) * (
+        TIME_SCALE // HORIZON_SCALE
+    )
 
 
 def time_to_grid_ceil(hours):
-    """Return the least half-hour tick not earlier than ``hours``."""
-    return int(math.ceil(hours * TIME_SCALE - 1e-9))
+    """Return the least existing half-hour planning tick, in minutes."""
+    return int(math.ceil(hours * HORIZON_SCALE - 1e-9)) * (
+        TIME_SCALE // HORIZON_SCALE
+    )
+
+
+def exact_minute_count(hours):
+    """Return the exact whole minutes represented by an hours value."""
+    if (not isinstance(hours, (int, float)) or isinstance(hours, bool)
+            or not _is_finite_real(hours)):
+        return None
+    scaled = hours * TIME_SCALE
+    if not _is_finite_real(scaled):
+        return None
+    if isinstance(scaled, int):
+        return scaled
+    if not scaled.is_integer():
+        return None
+    return int(scaled)
+
+
+def schedule_time_to_minute_count(hours):
+    """Recover an integer tick from a schedule hour value serialized as float.
+
+    This tolerance is limited to schedule output round-tripping. Input
+    durations continue to use ``exact_minute_count`` and remain strict.
+    """
+    if (not isinstance(hours, (int, float)) or isinstance(hours, bool)
+            or not _is_finite_real(hours)):
+        return None
+    scaled = hours * TIME_SCALE
+    if not _is_finite_real(scaled) or math.ulp(scaled) >= 0.5:
+        return None
+    nearest = round(scaled)
+    tolerance = max(1e-9, math.ulp(scaled) * 2)
+    if abs(scaled - nearest) > tolerance:
+        return None
+    return int(nearest)
 
 
 def is_integer_scaled(value, scale):
@@ -65,7 +105,7 @@ def _is_finite_real(value):
 def energy_precision_problems(processes, solar_profile, tariff_profile):
     """Return inputs that the current integer energy scales cannot encode."""
     problems = []
-    per_slot_scale = SOLAR_SCALE / TIME_SCALE
+    per_minute_energy_scale = SOLAR_SCALE // TIME_SCALE
 
     tariffs = tariff_profile.values() if isinstance(tariff_profile, dict) else ()
     for tariff in tariffs:
@@ -85,10 +125,10 @@ def energy_precision_problems(processes, solar_profile, tariff_profile):
                 or isinstance(solar_kw, bool)
                 or not _is_finite_real(solar_kw)):
             continue
-        if not is_integer_scaled(solar_kw, SOLAR_SCALE):
+        if not is_integer_scaled(solar_kw, SOLAR_POWER_SCALE):
             problems.append(
                 "energy.solar_profile values must be representable at "
-                f"1/{SOLAR_SCALE} kW; hour {hour!r} has {solar_kw!r}"
+                f"1/{SOLAR_POWER_SCALE} kW; hour {hour!r} has {solar_kw!r}"
             )
         valid_solar.append((hour, solar_kw))
 
@@ -105,21 +145,33 @@ def energy_precision_problems(processes, solar_profile, tariff_profile):
             or isinstance(power_kw, bool)
             or not _is_finite_real(power_kw)):
             continue
-        if not is_integer_scaled(power_kw, per_slot_scale):
+        if not is_integer_scaled(power_kw, 5):
             problems.append(
-                f"process '{process_id}': power_kw must be representable at "
-                f"{1 / SOLAR_SCALE:g} kWh per half-hour; got {power_kw!r}"
+                f"process '{process_id}': power_kw must remain representable "
+                f"at 0.2 kW increments; got {power_kw!r}"
+            )
+        if not is_integer_scaled(power_kw, per_minute_energy_scale):
+            problems.append(
+                f"process '{process_id}': power_kw cannot be represented "
+                "exactly in one-minute energy units"
             )
         for hour, solar_kw in valid_solar:
             draw_kw = min(solar_kw, power_kw)
-            if not is_integer_scaled(draw_kw, per_slot_scale):
+            if not is_integer_scaled(draw_kw, per_minute_energy_scale):
                 problems.append(
                     f"process '{process_id}' with solar_profile hour {hour!r} "
-                    f"cannot be represented at {1 / SOLAR_SCALE:g} kWh per "
-                    f"half-hour (solar={solar_kw!r} kW, power={power_kw!r} kW)"
+                    "cannot be represented exactly in one-minute energy "
+                    f"units (solar={solar_kw!r} kW, power={power_kw!r} kW)"
                 )
                 break
     return problems
+
+
+def energy_profile_value(profile, hour):
+    """Use an explicit elapsed-hour value, falling back to legacy daily cycling."""
+    if hour in profile:
+        return profile[hour]
+    return profile.get(hour % 24, 0.0)
 
 
 def dependency_topological_order(dependencies_by_process):
@@ -238,11 +290,18 @@ class ProcessSpec:
             "duration_hours" in data and "power_kw" in data,
             f"{factory_name}: {where} requires 'duration_hours' and 'power_kw'",
         )
-        _require_grid_time(
+        _require_number(
             factory_name, where, "duration_hours", data["duration_hours"], minimum=0
+        )
+        _require(
+            _is_finite_real(data["duration_hours"] * TIME_SCALE)
+            and data["duration_hours"] * TIME_SCALE <= MAX_CP_SAT_INTEGER,
+            f"{factory_name}: {where}.duration_hours is outside the supported "
+            "CP-SAT time domain",
         )
         _require_number(factory_name, where, "power_kw", data["power_kw"], minimum=0)
         self.duration_hours = data["duration_hours"]
+        self.duration_minutes = exact_minute_count(self.duration_hours)
         self.power_kw = data["power_kw"]
         _require(
             self.duration_hours > 0,
@@ -287,12 +346,10 @@ class ProcessSpec:
             )
         self.latest_finish = data.get("latest_finish")
 
-        # Duration must be representable on the half-hour scheduling grid.
-        duration_units = self.duration_hours * TIME_SCALE
         _require(
-            abs(duration_units - round(duration_units)) < 1e-9,
-            f"{factory_name}: {where}.duration_hours must be a multiple of "
-            f"{1 / TIME_SCALE} h on the scheduling grid, got {self.duration_hours}",
+            self.duration_minutes is not None and self.duration_minutes > 0,
+            f"{factory_name}: {where}.duration_hours must represent a "
+            f"positive whole number of minutes, got {self.duration_hours}",
         )
         self.capacity_units = data.get("capacity_units", 1)
         _require(
@@ -512,11 +569,11 @@ class FactoryConfig:
                             if process.latest_finish is not None
                             else self.production_deadline)
             finish_tick = time_to_grid_floor(finish_limit)
-            duration_ticks = int(round(process.duration_hours * TIME_SCALE))
+            duration_ticks = process.duration_minutes
             _require(
                 start_tick + duration_ticks <= finish_tick,
                 f"{self.factory_name}: process '{process.process_id}' cannot fit "
-                f"on the half-hour grid between earliest_start "
+                f"within its time window between earliest_start "
                 f"{process.earliest_start or 0} and finish limit "
                 f"{finish_limit} (duration {process.duration_hours} h)",
             )

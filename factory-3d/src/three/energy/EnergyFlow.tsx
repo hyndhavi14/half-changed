@@ -72,6 +72,12 @@ export function EnergyFlow() {
     const dt = Math.min(delta, 0.05);
     const e = energyNow();
     const { solar, grid, dist } = built.flows;
+    if (e.solar === null || e.grid === null || e.load === null) {
+      solar.mat.opacity = 0.15;
+      grid.mat.opacity = 0.15;
+      for (const flow of dist) flow.mat.opacity = 0.15;
+      return;
+    }
     solar.tex.offset.x -= (dt * e.solar) / 40;
     solar.mat.opacity = e.solar > 0 ? 0.95 : 0.25;
     grid.tex.offset.x -= (dt * e.grid) / 60;

@@ -1,4 +1,6 @@
 import factories from './factories'
+import { requestApiJson } from './apiTransport'
+import { supabase } from './supabase'
 import type {
   CompareMetric,
   Factory,
@@ -165,52 +167,29 @@ function isFactory(value: unknown): value is Factory {
   )
 }
 
-async function request(path: string, init?: RequestInit): Promise<Response> {
-  let response: Response
+async function request(path: string, init?: RequestInit): Promise<unknown> {
+  const { data, error } = await supabase.auth.getSession()
+  if (error) throw new ApiError(`Could not restore the Supabase session: ${error.message}`)
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: {
-        Accept: 'application/json',
-        ...init?.headers,
-      },
-    })
-  } catch (error) {
+    return await requestApiJson(API_BASE_URL, path, data.session?.access_token ?? null, init)
+  } catch (failure) {
     throw new ApiError(
-      error instanceof Error
-        ? `Could not connect to the ByteMe API: ${error.message}`
-        : 'Could not connect to the ByteMe API.',
-      { cause: error },
+      failure instanceof Error ? failure.message : 'The ByteMe API request failed.',
+      { cause: failure },
     )
   }
-
-  if (!response.ok) {
-    let detail = ''
-    try {
-      detail = (await response.text()).trim()
-    } catch {
-      detail = ''
-    }
-    throw new ApiError(
-      detail
-        ? `The ByteMe API returned ${response.status}: ${detail}`
-        : `The ByteMe API returned ${response.status} ${response.statusText}.`,
-    )
-  }
-  return response
 }
 
-async function responseJson(response: Response): Promise<unknown> {
-  try {
-    return await response.json()
-  } catch (error) {
-    throw new ApiError('The ByteMe API returned invalid JSON.', { cause: error })
+function responseData(payload: unknown): unknown {
+  if (!isRecord(payload) || !('data' in payload)) {
+    throw new ApiError('The ByteMe API response is missing its data envelope.')
   }
+  return payload.data
 }
 
 export async function getFactories(): Promise<Factory[]> {
   if (USE_MOCK) return factories
-  const payload = await responseJson(await request('/factories'))
+  const payload = responseData(await request('factories'))
   if (!Array.isArray(payload) || !payload.every(isFactory)) {
     throw new ApiError('The ByteMe API returned factory data in an unsupported format.')
   }
@@ -224,9 +203,7 @@ export async function getFactory(id: string): Promise<Factory> {
     return factory
   }
 
-  const payload = await responseJson(
-    await request(`/factories/${encodeURIComponent(id)}`),
-  )
+  const payload = responseData(await request(`factories/${encodeURIComponent(id)}`))
   if (!isFactory(payload)) {
     throw new ApiError('The ByteMe API returned factory data in an unsupported format.')
   }
@@ -239,7 +216,9 @@ export async function runOptimization(id: string): Promise<void> {
     return
   }
 
-  await request(`/factories/${encodeURIComponent(id)}/optimize`, {
+  await request(`factories/${encodeURIComponent(id)}/optimization-requests`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
   })
 }
