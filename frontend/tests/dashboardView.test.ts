@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  activeWindow,
   compareMetrics,
   daySegments,
   deltaTone,
@@ -88,8 +89,9 @@ test('KPIs show Not available instead of inventing values', () => {
   const full = kpiViews(baseline, optimized, 'INR')
   assert.deepEqual(full.map((kpi) => kpi.key), ['cost', 'solar', 'makespan', 'peak'])
   assert.equal(full[0].value, 'INR 120')
-  assert.equal(full[0].delta, '\u221240% vs baseline')
-  assert.match(full[1].delta ?? '', /pp vs baseline$/)
+  assert.equal(full[0].delta, '\u221240%')
+  assert.equal(full[0].note, 'vs baseline schedule')
+  assert.match(full[1].delta ?? '', /pp$/)
   for (const kpi of full) assert.ok(!/utili[sz]ation/i.test(`${kpi.label} ${kpi.note}`))
 })
 
@@ -195,4 +197,13 @@ test('equal top priority is ambiguous and price rank is used without metadata', 
   const segments = daySegments(tie, '2026-01-05')
   assert.deepEqual(segments.map((segment) => segment.band), ['peak'])
   assert.ok(near(segments[0].startFraction, 0.5))
+})
+
+test('activeWindow narrows a long horizon to whole hours that contain work, padded by one hour', () => {
+  const narrowed = activeWindow(optimized)
+  assert.equal(narrowed.horizonStart, '2026-01-05T09:00:00.000Z')
+  assert.equal(narrowed.horizonEnd, '2026-01-05T15:00:00.000Z')
+  assert.equal(narrowed.entries, optimized.entries)
+  const empty = schedule('x', [], null, null)
+  assert.equal(activeWindow(empty), empty)
 })

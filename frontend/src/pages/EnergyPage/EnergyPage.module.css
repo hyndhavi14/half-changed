@@ -55,3 +55,43 @@
     font-size: 13px;
   }
 }
+
+/* ---- Phase 6: current data inside the original layout ---- */
+.dayPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dayPicker select {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--white);
+  color: var(--espresso);
+  font: inherit;
+}
+
+.windowList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.readings {
+  margin-top: 14px;
+}
+
+.readings > summary {
+  display: list-item;
+  padding: 12px 0;
+  color: var(--link-dark);
+  font-weight: 700;
+  cursor: pointer;
+}

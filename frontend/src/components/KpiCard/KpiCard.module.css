@@ -57,6 +57,8 @@
   border-radius: var(--radius-pill);
   font-size: var(--fs-secondary);
   font-weight: 700;
+  flex: none;
+  white-space: nowrap;
 }
 
 .deltaBad {

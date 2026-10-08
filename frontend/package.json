@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:node": "node --experimental-strip-types --test tests/apiTransport.test.ts tests/backendContracts.test.ts tests/energyPresentation.test.ts tests/format.test.ts tests/provenance.test.ts tests/scheduleView.test.ts tests/energyView.test.ts tests/stageView.test.ts tests/optimizationView.test.ts tests/backendMapping.test.ts tests/shellStatus.test.ts tests/dashboardView.test.ts tests/schedulePageView.test.ts",
+    "test:node": "node --experimental-strip-types --test tests/apiTransport.test.ts tests/backendContracts.test.ts tests/energyPresentation.test.ts tests/format.test.ts tests/provenance.test.ts tests/scheduleView.test.ts tests/energyView.test.ts tests/stageView.test.ts tests/optimizationView.test.ts tests/backendMapping.test.ts tests/shellStatus.test.ts tests/dashboardView.test.ts tests/schedulePageView.test.ts tests/energyPageView.test.ts",
     "test:vitest": "vitest run tests/phase6EnergyImpact.test.ts tests/phase6UatValidation.test.ts",
     "test": "npm run test:node && npm run test:vitest"
   },

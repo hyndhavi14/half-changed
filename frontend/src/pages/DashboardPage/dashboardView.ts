@@ -195,17 +195,19 @@ export function kpiViews(
   return KPI_KEYS.map((key) => {
     const pair = metricPair(key, baseline, optimized)
     const definition = METRICS[key]
-    let note = 'Modeled \u00b7 optimized vs baseline schedule'
+    // Short delta pill plus a short note keep the original KPI card shape; the Modeled tag is shown separately.
+    let note = 'vs baseline schedule'
     if (!optimized) note = 'No optimized schedule yet'
     else if (pair.optimized === null) note = 'Not recorded on the optimized schedule'
-    else if (pair.baseline === null) note = 'Modeled \u00b7 no baseline value to compare'
+    else if (pair.baseline === null) note = 'No baseline value to compare'
+    const fullDelta = deltaText(pair)
     return {
       key,
       label: definition.label,
       value: pair.optimized === null ? NOT_AVAILABLE : definition.format(pair.optimized, currency),
-      delta: deltaText(pair),
+      delta: fullDelta?.replace(/ vs baseline$/, ''),
       deltaTone: deltaTone(pair),
-      note,
+      note: fullDelta === 'Baseline is zero' ? 'Baseline value is zero' : note,
     }
   })
 }
@@ -571,4 +573,31 @@ export function plannedLoadPct(schedule: StoredSchedule | undefined, machineId: 
     cursor = Math.max(cursor, end)
   }
   return Math.min(100, (busy / (horizonEnd - horizonStart)) * 100)
+}
+
+// ---------------------------------------------------------------- dashboard preview window
+
+/**
+ * The Dashboard preview shows only the part of the horizon that contains work (whole hours),
+ * plus one hour either side, so a multi-day horizon does not shrink the blocks to slivers. The full horizon stays on the Schedule page.
+ */
+export function activeWindow(schedule: StoredSchedule): StoredSchedule {
+  const horizonStart = toTime(schedule.horizonStart)
+  const horizonEnd = toTime(schedule.horizonEnd)
+  if (horizonStart === null || horizonEnd === null || horizonEnd <= horizonStart) return schedule
+  let first = Infinity
+  let last = -Infinity
+  for (const entry of schedule.entries) {
+    const start = toTime(entry.startsAt)
+    const end = toTime(entry.endsAt)
+    if (start === null || end === null || end <= start) continue
+    first = Math.min(first, start)
+    last = Math.max(last, end)
+  }
+  if (!Number.isFinite(first)) return schedule
+  // One hour of padding on each side keeps the first and last blocks clear of the track edges.
+  const start = Math.max(horizonStart, Math.floor(first / HOUR_MS) * HOUR_MS - HOUR_MS)
+  const end = Math.min(horizonEnd, Math.ceil(last / HOUR_MS) * HOUR_MS + HOUR_MS)
+  if (end <= start || (start === horizonStart && end === horizonEnd)) return schedule
+  return { ...schedule, horizonStart: new Date(start).toISOString(), horizonEnd: new Date(end).toISOString() }
 }

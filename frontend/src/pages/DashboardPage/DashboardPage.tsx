@@ -9,6 +9,7 @@ import KpiCard from '../../components/KpiCard/KpiCard'
 import Legend from '../../components/Legend/Legend'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import ProgressBar from '../../components/ProgressBar/ProgressBar'
+import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
 import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
 import type { BackendFactoryData } from '../../data/backendApi'
@@ -16,16 +17,17 @@ import { displayTimestamp, displayValue, findStoredSchedule } from '../../data/b
 import { PROVENANCE_LABEL, type Provenance } from '../../data/provenance'
 import { PROCESS_COLOR_KEYS, type ProcessColorKey } from '../../data/scheduleView'
 import type { ScheduleBlock, ScheduleColorKey } from '../../data/types'
-import { aggregateMeasuredEnergy } from '../energyChartData'
+import { sourceTag } from '../sourceProvenance'
+import { dayTariffBands, defaultEnergyDay, fullDayPoints } from '../EnergyPage/energyPageView'
+import { rulerLabels } from '../SchedulePage/schedulePageView'
 import {
+  activeWindow,
   compareMetrics,
-  daySegments,
   energyDays,
   energySourceLabel,
   energySourceNote,
   ganttRows,
   horizonSegments,
-  horizonTicks,
   kpiViews,
   plannedLoadPct,
   recordCountsCaption,
@@ -71,6 +73,10 @@ function provenanceFor(label: string): Provenance | undefined {
   return match ? (match[0] as Provenance) : undefined
 }
 
+function tagFor(provenance: Provenance | undefined) {
+  return provenance ? <ProvenanceTag provenance={provenance} /> : undefined
+}
+
 function BandStrip({ segments, label }: { segments: BandSegment[]; label: string }) {
   if (segments.length === 0) return null
   const summary = segments
@@ -101,23 +107,26 @@ function SchedulePreview({
   schedule: StoredSchedule
   baseline: StoredSchedule | undefined
 }) {
-  const rows = ganttRows(data, schedule, baseline)
+  const view = activeWindow(schedule)
+  const rows = ganttRows(data, view, baseline)
   if (rows.length === 0) {
     return <p className={styles.emptyMessage}>No schedule entries are available for this schedule.</p>
   }
-  const ticks = horizonTicks(schedule, data.factory.timezone)
+  const ticks = rulerLabels(view, data.factory.timezone, 5)
+  const viewHours = (Date.parse(view.horizonEnd) - Date.parse(view.horizonStart)) / 3_600_000
   const segments = horizonSegments(
     tariffWindows(data.tariffs),
-    Date.parse(schedule.horizonStart),
-    Date.parse(schedule.horizonEnd),
+    Date.parse(view.horizonStart),
+    Date.parse(view.horizonEnd),
     data.factory.timezone,
+    Math.min(2016, Math.max(96, Math.ceil(viewHours * 4))),
   )
 
   return (
     <div className={styles.ganttScroller}>
       <div className={styles.ganttInner}>
         <div className={styles.ganttBand}>
-          <BandStrip segments={segments} label="Configured tariff windows across the schedule horizon" />
+          <BandStrip segments={segments} label="Configured tariff windows across the shown window" />
         </div>
         {rows.map((row) => {
           const blocks: Array<ScheduleBlock & {
@@ -174,13 +183,15 @@ export default function DashboardPage() {
   const planned = provenanceFor('Planned')
 
   const days = energyDays(data.energy, timeZone)
-  const selectedDay = chosenDay !== null && days.includes(chosenDay) ? chosenDay : days[days.length - 1]
+  const selectedDay = chosenDay !== null && days.includes(chosenDay) ? chosenDay : defaultEnergyDay(data.energy, timeZone)
   const dayRows = selectedDay ? rowsForDay(data.energy, timeZone, selectedDay) : []
-  const hourlyEnergy = aggregateMeasuredEnergy(dayRows, timeZone)
+  const hourlyEnergy = selectedDay ? fullDayPoints(data.energy, timeZone, selectedDay) : []
+  const hasEnergy = hourlyEnergy.some((point) => point.generationKwh !== null)
   const sourceLabel = energySourceLabel(dayRows)
+  const energyTag = sourceTag(sourceLabel)
   const windows = tariffWindows(data.tariffs)
-  const daySegs = selectedDay ? daySegments(windows, selectedDay) : []
-  const bandsShown = [...new Set(daySegs.map((segment) => segment.band))]
+  const dayBands = selectedDay && windows.length ? dayTariffBands(windows, selectedDay) : undefined
+  const bandsShown = [...new Set((dayBands ?? []).filter((band): band is BandSegment['band'] => band !== null))]
 
   return (
     <>
@@ -229,7 +240,7 @@ export default function DashboardPage() {
             deltaTone={kpi.deltaTone}
             note={kpi.note}
             dotColor={KPI_DOTS[index % KPI_DOTS.length]}
-            provenance={kpi.value === 'Not available' ? undefined : modeled}
+            provenance={kpi.value === 'Not available' ? undefined : tagFor(modeled)}
           />
         ))}
       </section>
@@ -238,7 +249,7 @@ export default function DashboardPage() {
       <section className={styles.twoColumnGrid} aria-label="Energy and comparison">
         <Card
           title="Energy by hour"
-          provenance={provenanceFor(sourceLabel)}
+          provenance={energyTag ? <ProvenanceTag provenance={energyTag.provenance} label={energyTag.label} /> : undefined}
           action={days.length > 1 ? (
             <label className={styles.dayPicker}>
               <span>Day</span>
@@ -256,34 +267,29 @@ export default function DashboardPage() {
                 .filter((band) => band !== 'off')
                 .map((band) => ({
                   label: BAND_LABEL[band],
-                  color: band === 'peak' ? 'var(--band-peak)' : 'var(--band-mid)',
+                  color: band === 'peak' ? 'var(--terracotta)' : 'var(--tariff-mid)',
                   shape: 'square' as const,
                 })),
             ]}
           />
-          {hourlyEnergy.length ? (
-            <>
-              <EnergyChart
-                measuredEnergy={hourlyEnergy}
-                firstSeriesLabel="Generation"
-                secondSeriesLabel="Consumption"
-              />
-              <BandStrip segments={daySegs} label={`Configured tariff windows on ${selectedDay}`} />
-              <div className={styles.dayAxis} aria-hidden="true">
-                <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
-              </div>
-            </>
+          {hasEnergy ? (
+            <EnergyChart
+              measuredEnergy={hourlyEnergy}
+              tariffBands={dayBands}
+              firstSeriesLabel="Generation"
+              secondSeriesLabel="Consumption"
+            />
           ) : (
             <p className={styles.emptyMessage}>No hourly generation and consumption readings are available for this factory.</p>
           )}
           <p className={styles.sourceNote}>
             {selectedDay ? `${selectedDay} (${timeZone}) \u00b7 ` : ''}{energySourceNote(sourceLabel)}
-            {windows.length > 0 && daySegs.length === 0 ? ' Tariff windows have a single price, so no peak band is shown.' : ''}
+            {windows.length > 0 && bandsShown.length === 0 ? ' Tariff windows have a single price, so no peak band is shown.' : ''}
             {windows.length === 0 ? ' No tariff windows are configured.' : ''}
           </p>
         </Card>
         {comparison.length > 0 ? (
-          <CompareCard compare={comparison} provenance={modeled} />
+          <CompareCard compare={comparison} provenance={tagFor(modeled)} />
         ) : (
           <Card title="Baseline vs optimized">
             <p className={styles.emptyMessage}>A persisted baseline and optimized schedule pair is required for comparison.</p>
@@ -293,8 +299,8 @@ export default function DashboardPage() {
 
       <section className={styles.twoColumnGrid} aria-label="Schedule and machines">
         <Card
-          title={optimized ? `Optimized schedule \u00b7 ${optimized.name}` : 'Optimized schedule'}
-          provenance={optimized ? planned : undefined}
+          title={optimized && optimized.name.trim().toLowerCase() !== 'optimized schedule' ? `Optimized schedule \u00b7 ${optimized.name}` : 'Optimized schedule'}
+          provenance={optimized ? tagFor(planned) : undefined}
           action={<Link className={styles.timelineLink} to="/schedule">Open full timeline {'\u2192'}</Link>}
         >
           {optimized ? (
@@ -314,7 +320,7 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        <Card title="Machines" provenance={optimized ? planned : undefined}>
+        <Card title="Machines" provenance={optimized ? tagFor(planned) : undefined}>
           <div className={styles.machineList}>
             {data.machines.length ? data.machines.map((machine) => {
               const load = plannedLoadPct(optimized, machine.id)
