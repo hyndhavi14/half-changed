@@ -745,7 +745,7 @@ export default function Phase6UatPage() {
             <input id="phase6-email" style={styles.input} type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.currentTarget.value)} required />
             <label htmlFor="phase6-password">Password</label>
             <input id="phase6-password" style={styles.input} type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.currentTarget.value)} required />
-            <button style={styles.button} type="submit" disabled={busy}>{busy ? 'Signing inâ€¦' : 'Sign in with Supabase Auth'}</button>
+            <button style={styles.button} type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in with Supabase Auth'}</button>
           </form>
         ) : (
           <>
@@ -781,9 +781,9 @@ export default function Phase6UatPage() {
                   }).map(([name, count]) => <p key={name}><strong>{name}</strong>: {count}</p>)}
                 </div>
                 <h3>Process durations (canonical minutes)</h3>
-                <p>{snapshot.processes.map((process) => `${String(process.name)}: ${String(process.duration_minutes)} min`).join(' Â· ')}</p>
+                <p>{snapshot.processes.map((process) => `${String(process.name)}: ${String(process.duration_minutes)} min`).join(' · ')}</p>
                 <h3>Approved tariff windows (canonical)</h3>
-                <ul>{snapshot.tariffs.map((tariff) => <li key={String(tariff.id)}>{String(tariff.name)}: {String(tariff.start_time)}â€“{String(tariff.end_time)}; {String(tariff.energy_price_per_kwh)} {String(tariff.currency)}/kWh</li>)}</ul>
+                <ul>{snapshot.tariffs.map((tariff) => <li key={String(tariff.id)}>{String(tariff.name)}: {String(tariff.start_time)}–{String(tariff.end_time)}; {String(tariff.energy_price_per_kwh)} {String(tariff.currency)}/kWh</li>)}</ul>
                 <h3>Pre-run UUID inventory</h3>
                 <pre style={{ whiteSpace: 'pre-wrap', ...styles.code }}>{JSON.stringify({
                   factory: snapshot.factory.id,
@@ -808,7 +808,7 @@ export default function Phase6UatPage() {
                 <p>Optimizer status: {outcome.optimizerStatus}; schedule status: {outcome.scheduleStatus}</p>
                 <p style={styles.code}>Request: {outcome.requestId}<br />Result: {outcome.resultId}<br />Baseline schedule: {outcome.baselineScheduleId}<br />Optimized schedule: {outcome.scheduleId}<br />Entries: {outcome.entryIds.join(', ') || '(none)'}</p>
                 <ul>{outcome.checks.map((check) => <li key={check}>{check}</li>)}</ul>
-                <h3>Modeled demand-shift impact â€” synthetic demo data</h3>
+                <h3>Modeled demand-shift impact — synthetic demo data</h3>
                 <p>
                   These estimates compare optimizer-reported per-process solar allocation, grid import and
                   tariff-weighted energy cost, plus scheduled process power and timing. They are not measured
@@ -823,12 +823,12 @@ export default function Phase6UatPage() {
                         <th scope="col">Metric</th>
                         <th scope="col">Baseline</th>
                         <th scope="col">Optimized</th>
-                        <th scope="col">Optimized âˆ’ baseline</th>
+                        <th scope="col">Optimized − baseline</th>
                       </tr>
                     </thead>
                     <tbody>
                       {[
-                        ['Canonical IDs, exact durations, machine non-overlap and dependencies', 'Pass', 'Pass', 'â€”'],
+                        ['Canonical IDs, exact durations, machine non-overlap and dependencies', 'Pass', 'Pass', '—'],
                         ['Modeled process energy (kWh)', fixed(outcome.energyImpact.baseline.totalProcessEnergyKwh), fixed(outcome.energyImpact.optimized.totalProcessEnergyKwh), signed(outcome.energyImpact.processEnergyChangeKwh)],
                         ['Modeled solar allocated to processes (kWh)', fixed(outcome.energyImpact.baseline.modeledSolarAllocatedKwh), fixed(outcome.energyImpact.optimized.modeledSolarAllocatedKwh), signed(outcome.energyImpact.modeledSolarAllocationChangeKwh)],
                         ['Modeled grid import (kWh)', fixed(outcome.energyImpact.baseline.modeledGridImportKwh), fixed(outcome.energyImpact.optimized.modeledGridImportKwh), signed(outcome.energyImpact.optimized.modeledGridImportKwh - outcome.energyImpact.baseline.modeledGridImportKwh)],
@@ -850,7 +850,7 @@ export default function Phase6UatPage() {
                   </table>
                 </div>
                 <p>
-                  â€œSynthetic solar-profile allocationâ€ is modeled process allocation divided by the solar
+                  “Synthetic solar-profile allocation” is modeled process allocation divided by the solar
                   profile supplied to this optimization; it does not establish physical site consumption.
                   A negative grid-import or cost change means the optimized schedule has a lower modeled
                   value. Cost uses {outcome.currency} as declared by the canonical tariffs.
@@ -861,7 +861,7 @@ export default function Phase6UatPage() {
                     <ul>
                       {outcome.energyImpact.processMoveComparisons.map((shift) => (
                         <li key={shift.processId}>
-                          <strong>{shift.processName}</strong>: baseline {shift.baselineStartsAt} â†’ optimized {shift.optimizedStartsAt}
+                          <strong>{shift.processName}</strong>: baseline {shift.baselineStartsAt} → optimized {shift.optimizedStartsAt}
                           {' '}({signed(shift.shiftMinutes)} min).
                           {' '}Modeled solar allocation: {fixed(shift.baselineSolarKwh)} → {fixed(shift.optimizedSolarKwh)} kWh
                           {' '}({signed(shift.solarDeltaKwh)} kWh).
