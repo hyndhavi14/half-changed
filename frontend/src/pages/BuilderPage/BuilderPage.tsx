@@ -662,6 +662,12 @@ export default function BuilderPage() {
         })}
       </div>
       <p className={styles.energyCaption}>Off-peak · Peak tariff</p>
+      <p className={styles.energyCaption}>
+        Saving creates three tariff windows: off-peak 00:00–18:00, peak 18:00–22:00 and off-peak 22:00–24:00.
+        Solar capacity is saved as factory configuration only. The optimizer uses stored 15-minute solar
+        generation readings for the planning horizon, which this builder does not create, so add energy
+        readings before running optimization for a new factory.
+      </p>
     </Card>
   )
 
@@ -695,6 +701,9 @@ export default function BuilderPage() {
               <li key={process.id}>{process.name || 'Unnamed step'} · {process.duration} min</li>
             ))}
           </ol>
+          <p className={styles.energyCaption}>
+            Steps are saved without dependencies, so the optimizer only keeps one step at a time on each machine.
+          </p>
         </div>
       </div>
     </Card>
