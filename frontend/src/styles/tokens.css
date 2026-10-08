@@ -105,4 +105,44 @@
   --page-pad-top: 28px;
   --page-pad-x: clamp(16px, 3vw, 40px);
   --page-pad-bottom: 48px;
+
+  /* ---- Phase 2: data presentation tokens ---- */
+  /* provenance tags */
+  --prov-recorded-bg: transparent;
+  --prov-recorded-ink: var(--text-2);
+  --prov-recorded-border: var(--line);
+  --prov-measured-bg: var(--teal-soft);
+  --prov-measured-ink: var(--teal-ink);
+  --prov-modeled-bg: var(--sun-soft);
+  --prov-modeled-ink: var(--sun-ink);
+  --prov-planned-bg: var(--line-soft);
+  --prov-planned-ink: var(--text-2);
+  --prov-planned-border: var(--toffee);
+  --prov-assumption-bg: var(--sand);
+  --prov-assumption-ink: var(--link-dark);
+  --prov-unavailable-bg: var(--idle-soft);
+  --prov-unavailable-ink: var(--text-3);
+  --prov-unclassified-bg: var(--idle-soft);
+  --prov-unclassified-ink: var(--text-2);
+  --prov-unclassified-border: var(--line-strong);
+  /* change (delta) tone */
+  --delta-good-bg: var(--teal-soft);
+  --delta-good-ink: var(--teal-ink);
+  --delta-bad-bg: var(--terra-soft);
+  --delta-bad-ink: var(--terra-ink);
+  --delta-neutral-bg: var(--idle-soft);
+  --delta-neutral-ink: var(--text-2);
+  /* process palette — 8 stable colours, text contrast >= 4.5:1 */
+  --process-caramel: var(--caramel);         --process-caramel-ink: var(--milk);
+  --process-teal: var(--teal);               --process-teal-ink: var(--milk);
+  --process-sun: var(--sun);                 --process-sun-ink: var(--espresso);
+  --process-plum: var(--plum);               --process-plum-ink: var(--milk);
+  --process-olive: var(--olive);             --process-olive-ink: var(--milk);
+  --process-toffee: var(--toffee);           --process-toffee-ink: var(--espresso);
+  --process-grid-brown: var(--grid-brown);   --process-grid-brown-ink: var(--milk);
+  --process-terracotta: var(--terracotta);   --process-terracotta-ink: var(--milk);
+  /* tariff background bands behind Gantt rows */
+  --band-peak: #f6dcd2;
+  --band-mid: #f8e9df;
+  --band-off: transparent;
 }

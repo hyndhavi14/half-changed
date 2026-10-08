@@ -18,12 +18,22 @@
   border-bottom: 1.5px solid var(--line-strong);
 }
 
+.valueScale {
+  margin: 0 0 6px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
 .chartColumn {
   min-width: 0;
   flex: 1;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+}
+
+.noData {
+  border-bottom: 1px dashed var(--line-strong);
 }
 
 .measuredColumn {
@@ -83,6 +93,11 @@
   background: var(--tariff-off);
 }
 
+.tariff-none {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+}
+
 .hourLabels {
   margin-top: 4px;
 }
@@ -93,10 +108,4 @@
   color: var(--text-2);
   font-size: 13px;
   text-align: center;
-}
-
-.chartNote {
-  margin: 14px 0 0;
-  color: var(--text-2);
-  font-size: 15px;
 }

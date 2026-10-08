@@ -14,6 +14,10 @@
   gap: 8px;
 }
 
+.provenance {
+  margin-left: auto;
+}
+
 .dot {
   width: 12px;
   height: 12px;
@@ -53,6 +57,16 @@
   border-radius: var(--radius-pill);
   font-size: var(--fs-secondary);
   font-weight: 700;
+}
+
+.deltaBad {
+  background: var(--delta-bad-bg);
+  color: var(--delta-bad-ink);
+}
+
+.deltaNeutral {
+  background: var(--delta-neutral-bg);
+  color: var(--delta-neutral-ink);
 }
 
 .note {

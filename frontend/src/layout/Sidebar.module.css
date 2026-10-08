@@ -104,3 +104,112 @@
 .optimizerTitle {
   color: var(--milk);
 }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  flex: 1;
+}
+
+.navDivider {
+  height: 1px;
+  margin: 8px 12px;
+  background: var(--side-input-border);
+  list-style: none;
+}
+
+.navCaption {
+  display: block;
+  font-size: var(--fs-caption);
+  color: var(--side-muted);
+  font-weight: 400;
+}
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control);
+  background: var(--chocolate-2);
+  color: var(--side-card-text);
+  font-size: var(--fs-caption);
+}
+
+.accountLabel {
+  color: var(--side-muted);
+}
+
+.accountEmail {
+  color: var(--side-text);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.signOut {
+  align-self: flex-start;
+  margin-top: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--side-input-border);
+  background: transparent;
+  color: var(--side-text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.signOut:hover {
+  background: var(--side-hover);
+}
+
+.signOut:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.accountError {
+  margin: 4px 0 0;
+  color: var(--terra-soft);
+}
+
+.launcherDetails {
+  border-radius: var(--radius-control);
+}
+
+.launcherSummary {
+  cursor: pointer;
+  color: var(--side-text);
+  font-weight: 700;
+  padding: 8px 4px;
+}
+
+.menuToggle {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .menuToggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--control-h);
+    padding: 0 16px;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--side-input-border);
+    background: var(--chocolate-2);
+    color: var(--side-text);
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .panel {
+    display: none;
+  }
+
+  .panelOpen {
+    display: flex;
+  }
+}

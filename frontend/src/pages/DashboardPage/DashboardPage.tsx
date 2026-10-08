@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import Button from '../../components/Button/Button'
 import Card from '../../components/Card/Card'
 import CompareCard from '../../components/CompareCard/CompareCard'
@@ -6,12 +8,32 @@ import GanttRow from '../../components/GanttRow/GanttRow'
 import KpiCard from '../../components/KpiCard/KpiCard'
 import Legend from '../../components/Legend/Legend'
 import PageHeader from '../../components/PageHeader/PageHeader'
+import ProgressBar from '../../components/ProgressBar/ProgressBar'
+import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
 import type { BackendFactoryData } from '../../data/backendApi'
-import type { CompareMetric, ScheduleBlock } from '../../data/types'
-import { displayTimestamp, displayValue, findStoredSchedule, machineName, processName } from '../../data/backendView'
+import { displayTimestamp, displayValue, findStoredSchedule } from '../../data/backendView'
+import { PROVENANCE_LABEL, type Provenance } from '../../data/provenance'
+import { PROCESS_COLOR_KEYS, type ProcessColorKey } from '../../data/scheduleView'
+import type { ScheduleBlock, ScheduleColorKey } from '../../data/types'
 import { aggregateMeasuredEnergy } from '../energyChartData'
-import { Link } from 'react-router-dom'
+import {
+  compareMetrics,
+  daySegments,
+  energyDays,
+  energySourceLabel,
+  energySourceNote,
+  ganttRows,
+  horizonSegments,
+  horizonTicks,
+  kpiViews,
+  plannedLoadPct,
+  recordCountsCaption,
+  rowsForDay,
+  tariffWindows,
+  type BandSegment,
+  type StoredSchedule,
+} from './dashboardView'
 import styles from './DashboardPage.module.css'
 
 const PLAY_ICON = (
@@ -38,143 +60,143 @@ const CUBE_ICON = (
   </svg>
 )
 
-function scheduleBlocks(data: BackendFactoryData, scheduleId: string): ScheduleBlock[] {
-  const schedule = data.schedules.find((item) => item.id === scheduleId)
-  if (!schedule) return []
-  const start = Date.parse(schedule.horizonStart)
-  const end = Date.parse(schedule.horizonEnd)
-  const duration = end - start
-  if (!Number.isFinite(duration) || duration <= 0) return []
+const KPI_DOTS = ['var(--caramel)', 'var(--sun)', 'var(--teal)', 'var(--plum)']
+const LEGACY_COLOR_KEYS: ScheduleColorKey[] = ['roast', 'grind', 'conche', 'temper', 'mould', 'pack']
+const BAND_LABEL: Record<BandSegment['band'], string> = { peak: 'Peak price', mid: 'Mid price', off: 'Off-peak price' }
 
-  const baseline = findStoredSchedule(data, 'baseline')
-  const baselineStarts = new Map(
-    baseline?.entries.map((entry) => [entry.processId, Date.parse(entry.startsAt)]) ?? [],
+// Resolve a provenance key by its visible label so the page follows data/provenance.ts exactly.
+function provenanceFor(label: string): Provenance | undefined {
+  const match = (Object.entries(PROVENANCE_LABEL) as Array<[string, string]>)
+    .find(([, text]) => text.toLowerCase() === label.toLowerCase())
+  return match ? (match[0] as Provenance) : undefined
+}
+
+function BandStrip({ segments, label }: { segments: BandSegment[]; label: string }) {
+  if (segments.length === 0) return null
+  const summary = segments
+    .filter((segment) => segment.band !== 'off')
+    .map((segment) => BAND_LABEL[segment.band])
+  return (
+    <div className={styles.bandStrip} role="img" aria-label={`${label}${summary.length ? `: ${[...new Set(summary)].join(', ')}` : ''}`}>
+      {segments.map((segment) => (
+        <span
+          key={`${segment.band}-${segment.startFraction}`}
+          className={`${styles.band} ${styles[`band_${segment.band}`] ?? ''}`}
+          style={{
+            left: `${segment.startFraction * 100}%`,
+            width: `${(segment.endFraction - segment.startFraction) * 100}%`,
+          }}
+        />
+      ))}
+    </div>
   )
-
-  return schedule.entries.flatMap((entry, index) => {
-    const entryStart = Date.parse(entry.startsAt)
-    const entryEnd = Date.parse(entry.endsAt)
-    if (!Number.isFinite(entryStart) || !Number.isFinite(entryEnd) || entryEnd <= entryStart) return []
-    const startHour = ((entryStart - start) / duration) * 24
-    const endHour = ((entryEnd - start) / duration) * 24
-    if (endHour <= 0 || startHour >= 24) return []
-    const colorKeys: ScheduleBlock['colorKey'][] = ['roast', 'grind', 'conche', 'temper', 'mould', 'pack']
-    const baselineStart = baselineStarts.get(entry.processId)
-    return [{
-      id: entry.id,
-      processName: processName(data, entry.processId),
-      machineId: entry.machineId,
-      start: Math.max(0, startHour),
-      end: Math.min(24, endHour),
-      colorKey: colorKeys[index % colorKeys.length],
-      shifted: baselineStart !== undefined && baselineStart !== entryStart,
-    }]
-  })
 }
 
 function SchedulePreview({
   data,
   schedule,
+  baseline,
 }: {
   data: BackendFactoryData
-  schedule: NonNullable<ReturnType<typeof findStoredSchedule>>
+  schedule: StoredSchedule
+  baseline: StoredSchedule | undefined
 }) {
-  const blocks = scheduleBlocks(data, schedule.id)
-  const grouped = new Map<string, ScheduleBlock[]>()
-  for (const block of blocks) {
-    const machineBlocks = grouped.get(block.machineId) ?? []
-    machineBlocks.push(block)
-    grouped.set(block.machineId, machineBlocks)
-  }
-
-  if (blocks.length === 0) {
+  const rows = ganttRows(data, schedule, baseline)
+  if (rows.length === 0) {
     return <p className={styles.emptyMessage}>No schedule entries are available for this schedule.</p>
   }
-  const horizonStart = Date.parse(schedule.horizonStart)
-  const horizonEnd = Date.parse(schedule.horizonEnd)
-  const timeFormatter = new Intl.DateTimeFormat('en-GB', {
-    timeZone: data.factory.timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
+  const ticks = horizonTicks(schedule, data.factory.timezone)
+  const segments = horizonSegments(
+    tariffWindows(data.tariffs),
+    Date.parse(schedule.horizonStart),
+    Date.parse(schedule.horizonEnd),
+    data.factory.timezone,
+  )
 
   return (
     <div className={styles.ganttScroller}>
       <div className={styles.ganttInner}>
-        {[...grouped].map(([machineId, machineBlocks]) => (
-          <GanttRow
-            key={machineId}
-            label={machineName(data, machineId)}
-            blocks={machineBlocks}
-            height={30}
-            compact
-          />
-        ))}
+        <div className={styles.ganttBand}>
+          <BandStrip segments={segments} label="Configured tariff windows across the schedule horizon" />
+        </div>
+        {rows.map((row) => {
+          const blocks: Array<ScheduleBlock & {
+            processColor: ProcessColorKey
+            tooltip: string
+            leftFraction: number
+            widthFraction: number
+          }> = row.blocks.map((block) => ({
+            id: block.id,
+            processName: block.processName,
+            machineId: block.machineId,
+            start: block.startHour,
+            end: block.endHour,
+            colorKey: LEGACY_COLOR_KEYS[block.colorIndex % LEGACY_COLOR_KEYS.length],
+            shifted: block.shifted,
+            processColor: PROCESS_COLOR_KEYS[block.colorIndex % PROCESS_COLOR_KEYS.length],
+            tooltip: block.tooltip,
+            leftFraction: block.leftFraction,
+            widthFraction: block.widthFraction,
+          }))
+          return (
+            <GanttRow
+              key={row.machineId}
+              label={row.machineName}
+              blocks={blocks}
+              height={30}
+              compact
+            />
+          )
+        })}
         <div className={styles.timeAxis} aria-hidden="true">
-          {[0, 0.25, 0.5, 0.75, 1].map((fraction) => (
-            <span key={fraction}>{timeFormatter.format(new Date(horizonStart + (horizonEnd - horizonStart) * fraction))}</span>
-          ))}
+          {ticks.map((tick, index) => <span key={`${tick}-${index}`}>{tick}</span>)}
         </div>
       </div>
     </div>
   )
 }
 
-function scheduleComparisons(data: BackendFactoryData): CompareMetric[] {
-  const baseline = findStoredSchedule(data, 'baseline')
-  const optimized = findStoredSchedule(data, 'optimized')
-  if (!baseline || !optimized) return []
-
-  const metrics: CompareMetric[] = []
-  const addMetric = (label: string, base: number | null, current: number | null, unit: string) => {
-    if (base === null || current === null || base < 0 || current < 0) return
-    const largest = Math.max(base, current)
-    const baselinePct = largest === 0 ? 100 : (base / largest) * 100
-    const optimizedPct = largest === 0 ? 100 : (current / largest) * 100
-    const change = base === 0
-      ? (current === 0 ? 'No change' : 'Baseline is zero')
-      : `${((current - base) / base * 100).toFixed(1)}%`
-    metrics.push({
-      label,
-      baseline: `${displayValue(base)}${unit}`,
-      optimized: `${displayValue(current)}${unit}`,
-      baselinePct,
-      optimizedPct,
-      change,
-    })
-  }
-
-  addMetric('Energy', baseline.totalEnergyKwh, optimized.totalEnergyKwh, ' kWh')
-  addMetric(`Energy cost (${data.factory.currency})`, baseline.totalEnergyCost, optimized.totalEnergyCost, '')
-  return metrics
-}
-
 export default function DashboardPage() {
   const { backendData, loading, error, runOptimization, optimizing, optimizationError } = useFactory()
+  const [chosenDay, setChosenDay] = useState<string | null>(null)
+
   if (!backendData) {
     return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
   }
 
   const data = backendData
+  const timeZone = data.factory.timezone
+  const baseline = findStoredSchedule(data, 'baseline')
   const optimized = findStoredSchedule(data, 'optimized')
-  const comparison = scheduleComparisons(data)
-  const hourlyEnergy = aggregateMeasuredEnergy(data.energy, data.factory.timezone)
-  const latestEnergy = [...data.energy].filter((row) =>
-    typeof row.recorded_at === 'string' && Number.isFinite(Date.parse(row.recorded_at)),
-  ).sort((left, right) => {
-    const leftTime = typeof left.recorded_at === 'string' ? Date.parse(left.recorded_at) : 0
-    const rightTime = typeof right.recorded_at === 'string' ? Date.parse(right.recorded_at) : 0
-    return rightTime - leftTime
-  })[0]
+  const kpis = kpiViews(baseline, optimized, data.factory.currency)
+  const comparison = compareMetrics(baseline, optimized, data.factory.currency)
+  const modeled = provenanceFor('Modeled')
+  const planned = provenanceFor('Planned')
+
+  const days = energyDays(data.energy, timeZone)
+  const selectedDay = chosenDay !== null && days.includes(chosenDay) ? chosenDay : days[days.length - 1]
+  const dayRows = selectedDay ? rowsForDay(data.energy, timeZone, selectedDay) : []
+  const hourlyEnergy = aggregateMeasuredEnergy(dayRows, timeZone)
+  const sourceLabel = energySourceLabel(dayRows)
+  const windows = tariffWindows(data.tariffs)
+  const daySegs = selectedDay ? daySegments(windows, selectedDay) : []
+  const bandsShown = [...new Set(daySegs.map((segment) => segment.band))]
 
   return (
     <>
       <PageHeader
-        eyebrow={data.factory.name}
+        eyebrow={`${data.factory.name} \u00b7 ${timeZone}`}
         title="Factory dashboard"
         actions={[
-          <Button key="export" variant="secondary">Export report</Button>,
+          <Button
+            key="export"
+            variant="secondary"
+            disabled
+            title="Report export is not available yet"
+            aria-describedby="dashboard-export-note"
+          >
+            Export report
+          </Button>,
           <Button
             key="optimize"
             variant="primary"
@@ -186,6 +208,7 @@ export default function DashboardPage() {
           </Button>,
         ]}
       />
+      <p id="dashboard-export-note" className={styles.srOnly}>Report export is not available yet.</p>
 
       {optimizationError && (
         <Card title="Optimization failed">
@@ -197,39 +220,70 @@ export default function DashboardPage() {
       )}
 
       <section className={styles.kpiGrid} aria-label="Factory key performance indicators">
-        <KpiCard label="Machines" value={data.machines.length} note="Persisted inventory" dotColor="var(--caramel)" />
-        <KpiCard label="Processes" value={data.processes.length} note="Persisted process records" dotColor="var(--teal)" />
-        <KpiCard label="Schedules" value={data.schedules.length} note="Persisted schedules" dotColor="var(--sun)" />
-        <KpiCard label="Energy readings" value={data.energy.length} note="Persisted intervals" dotColor="var(--plum)" />
+        {kpis.map((kpi, index) => (
+          <KpiCard
+            key={kpi.key}
+            label={kpi.label}
+            value={kpi.value}
+            delta={kpi.delta}
+            deltaTone={kpi.deltaTone}
+            note={kpi.note}
+            dotColor={KPI_DOTS[index % KPI_DOTS.length]}
+            provenance={kpi.value === 'Not available' ? undefined : modeled}
+          />
+        ))}
       </section>
+      <p className={styles.recordCaption}>{recordCountsCaption(data)}</p>
 
       <section className={styles.twoColumnGrid} aria-label="Energy and comparison">
-        <Card title="Recorded energy by hour">
+        <Card
+          title="Energy by hour"
+          provenance={provenanceFor(sourceLabel)}
+          action={days.length > 1 ? (
+            <label className={styles.dayPicker}>
+              <span>Day</span>
+              <select value={selectedDay} onChange={(event) => setChosenDay(event.target.value)}>
+                {days.map((day) => <option key={day} value={day}>{day}</option>)}
+              </select>
+            </label>
+          ) : undefined}
+        >
           <Legend
             items={[
               { label: 'Generation', color: 'var(--sun)', shape: 'square' },
               { label: 'Consumption', color: 'var(--grid-brown)', shape: 'square' },
+              ...bandsShown
+                .filter((band) => band !== 'off')
+                .map((band) => ({
+                  label: BAND_LABEL[band],
+                  color: band === 'peak' ? 'var(--band-peak)' : 'var(--band-mid)',
+                  shape: 'square' as const,
+                })),
             ]}
           />
           {hourlyEnergy.length ? (
-            <EnergyChart
-              measuredEnergy={hourlyEnergy}
-              firstSeriesLabel="Generation"
-              secondSeriesLabel="Consumption"
-            />
+            <>
+              <EnergyChart
+                measuredEnergy={hourlyEnergy}
+                firstSeriesLabel="Generation"
+                secondSeriesLabel="Consumption"
+              />
+              <BandStrip segments={daySegs} label={`Configured tariff windows on ${selectedDay}`} />
+              <div className={styles.dayAxis} aria-hidden="true">
+                <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+              </div>
+            </>
           ) : (
             <p className={styles.emptyMessage}>No hourly generation and consumption readings are available for this factory.</p>
           )}
-          {latestEnergy && (
-            <p className={styles.emptyMessage}>
-              Latest consumption: {displayValue(latestEnergy.consumption_kwh, ' kWh')} ·
-              {' '}generation: {displayValue(latestEnergy.generation_kwh, ' kWh')} ·
-              {' '}source: {displayValue(latestEnergy.source)}
-            </p>
-          )}
+          <p className={styles.sourceNote}>
+            {selectedDay ? `${selectedDay} (${timeZone}) \u00b7 ` : ''}{energySourceNote(sourceLabel)}
+            {windows.length > 0 && daySegs.length === 0 ? ' Tariff windows have a single price, so no peak band is shown.' : ''}
+            {windows.length === 0 ? ' No tariff windows are configured.' : ''}
+          </p>
         </Card>
         {comparison.length > 0 ? (
-          <CompareCard compare={comparison} />
+          <CompareCard compare={comparison} provenance={modeled} />
         ) : (
           <Card title="Baseline vs optimized">
             <p className={styles.emptyMessage}>A persisted baseline and optimized schedule pair is required for comparison.</p>
@@ -239,15 +293,16 @@ export default function DashboardPage() {
 
       <section className={styles.twoColumnGrid} aria-label="Schedule and machines">
         <Card
-          title={optimized ? `Optimized schedule · ${optimized.name}` : 'Optimized schedule'}
-          action={<Link className={styles.timelineLink} to="/schedule">Open full timeline →</Link>}
+          title={optimized ? `Optimized schedule \u00b7 ${optimized.name}` : 'Optimized schedule'}
+          provenance={optimized ? planned : undefined}
+          action={<Link className={styles.timelineLink} to="/schedule">Open full timeline {'\u2192'}</Link>}
         >
           {optimized ? (
             <>
               <p className={styles.emptyMessage}>
-                {displayTimestamp(optimized.horizonStart, data.factory.timezone)} – {displayTimestamp(optimized.horizonEnd, data.factory.timezone)}
+                {displayTimestamp(optimized.horizonStart, timeZone)} {'\u2013'} {displayTimestamp(optimized.horizonEnd, timeZone)} ({timeZone})
               </p>
-              <SchedulePreview data={data} schedule={optimized} />
+              <SchedulePreview data={data} schedule={optimized} baseline={baseline} />
             </>
           ) : (
             <div className={styles.emptySchedule}>
@@ -259,25 +314,43 @@ export default function DashboardPage() {
           )}
         </Card>
 
-        <Card title="Machines">
+        <Card title="Machines" provenance={optimized ? planned : undefined}>
           <div className={styles.machineList}>
-            {data.machines.length ? data.machines.map((machine) => (
-              <div className={styles.machineRow} key={machine.id}>
-                <div className={styles.machineDetails}>
-                  <strong>{machine.name}</strong>
-                  <span>{displayValue(machine.ratedPowerKw, ' kW rated')}</span>
+            {data.machines.length ? data.machines.map((machine) => {
+              const load = plannedLoadPct(optimized, machine.id)
+              return (
+                <div className={styles.machineRow} key={machine.id}>
+                  <div className={styles.machineDetails}>
+                    <strong>{machine.name}</strong>
+                    <span>{displayValue(machine.ratedPowerKw, ' kW rated')}</span>
+                  </div>
+                  <StatusChip status={machine.isActive ? 'Active' : 'Inactive'} />
+                  <div className={styles.plannedLoad}>
+                    {load === null ? (
+                      <span className={styles.mutedText}>Planned load: Not available</span>
+                    ) : (
+                      <>
+                        <ProgressBar value={load} color="var(--teal)" ariaLabel={`${machine.name} planned load`} />
+                        <strong>{Math.round(load)}%</strong>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <span>{machine.isActive ? 'Active configuration' : 'Inactive configuration'}</span>
-              </div>
-            )) : <p className={styles.emptyMessage}>No machines are persisted for this factory.</p>}
+              )
+            }) : <p className={styles.emptyMessage}>No machines are persisted for this factory.</p>}
           </div>
+          {data.machines.length > 0 && (
+            <p className={styles.sourceNote}>
+              Planned load is the share of the optimized schedule horizon each machine is booked. It is planned, not measured machine activity.
+            </p>
+          )}
         </Card>
       </section>
 
       <section className={styles.modelSlot} aria-label="Factory floor view">
         <div className={styles.modelIcon}>{CUBE_ICON}</div>
         <div className={styles.modelCopy}>
-          <h2>{data.factory.name} · Factory view</h2>
+          <h2>{data.factory.name} {'\u00b7'} Factory view</h2>
           <p>View persisted machine and process records. A physical floor layout or live machine telemetry is not available from the current Backend data.</p>
         </div>
         <Link className={styles.modelLink} to="/factory-view">

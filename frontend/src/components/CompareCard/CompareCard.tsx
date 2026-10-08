@@ -5,16 +5,18 @@ import type { CompareMetric } from '../../data/types'
 import styles from './CompareCard.module.css'
 
 interface CompareCardProps {
-  compare: CompareMetric[]
+  compare: Array<CompareMetric & { changeTone?: 'good' | 'bad' | 'neutral' }>
   title?: string
+  provenance?: React.ReactNode
 }
 
 export default function CompareCard({
   compare,
   title = 'Baseline vs optimized',
+  provenance,
 }: CompareCardProps) {
   return (
-    <Card title={title}>
+    <Card title={title} provenance={provenance}>
       <Legend
         items={[
           { label: 'Baseline', color: 'var(--tan)', shape: 'square' },
@@ -26,7 +28,14 @@ export default function CompareCard({
           <div className={styles.compareMetric} key={metric.label}>
             <div className={styles.compareHeading}>
               <strong>{metric.label}</strong>
-              <span>{metric.change}</span>
+              <span className={metric.changeTone === 'bad'
+                ? styles.changeBad
+                : metric.changeTone === 'neutral'
+                  ? styles.changeNeutral
+                  : undefined}
+              >
+                {metric.change}
+              </span>
             </div>
             <div className={styles.compareBarRow}>
               <ProgressBar

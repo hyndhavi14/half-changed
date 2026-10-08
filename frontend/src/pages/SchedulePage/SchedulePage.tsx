@@ -1,126 +1,214 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Button from '../../components/Button/Button'
 import Card from '../../components/Card/Card'
 import GanttRow from '../../components/GanttRow/GanttRow'
 import Legend from '../../components/Legend/Legend'
 import PageHeader from '../../components/PageHeader/PageHeader'
+import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
 import SegmentedToggle from '../../components/SegmentedToggle/SegmentedToggle'
 import StatTile from '../../components/StatTile/StatTile'
+import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
 import type { BackendFactoryData } from '../../data/backendApi'
-import { displayTimestamp, displayValue, machineName, processName, scheduleKind, type StoredSchedule } from '../../data/backendView'
-import type { ScheduleBlock } from '../../data/types'
+import { scheduleKind, type StoredSchedule } from '../../data/backendView'
+import { PROVENANCE_LABEL, type Provenance } from '../../data/provenance'
+import { PROCESS_COLOR_KEYS } from '../../data/scheduleView'
+import type { ScheduleColorKey } from '../../data/types'
+import {
+  NOT_AVAILABLE,
+  horizonSegments,
+  tariffWindows,
+  type BandSegment,
+} from '../DashboardPage/dashboardView'
 import styles from './SchedulePage.module.css'
+import {
+  allEntriesPlanned,
+  generationSegments,
+  machineRows,
+  rulerLabels,
+  runDetails,
+  scheduleComparability,
+  shiftRows,
+  summaryTiles,
+  tariffCurrencyNote,
+  tariffSampleCount,
+} from './schedulePageView'
 
 const VERSION_OPTIONS = [
   { value: 'baseline', label: 'Baseline' },
   { value: 'optimized', label: 'Optimized' },
 ]
 
-function clockAtFraction(schedule: StoredSchedule, fraction: number, timeZone: string) {
-  const start = Date.parse(schedule.horizonStart)
-  const end = Date.parse(schedule.horizonEnd)
-  const date = new Date(start + (end - start) * fraction)
-  if (!Number.isFinite(date.getTime())) return '—'
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date)
+const LEGACY_COLOR_KEYS: ScheduleColorKey[] = ['roast', 'grind', 'conche', 'temper', 'mould', 'pack']
+const CHANGE_STATUS = {
+  'Moved out of peak price': 'Saved',
+  'Moved into peak price': 'Peak',
+  'Moved into generation hours': 'Solar',
+  Retimed: 'Idle',
+} as const
+
+function provenanceFor(label: string): Provenance | undefined {
+  const match = (Object.entries(PROVENANCE_LABEL) as Array<[string, string]>)
+    .find(([, text]) => text.toLowerCase() === label.toLowerCase())
+  return match ? (match[0] as Provenance) : undefined
 }
 
-function blocksForSchedule(data: BackendFactoryData, schedule: StoredSchedule): ScheduleBlock[] {
-  const horizonStart = Date.parse(schedule.horizonStart)
-  const horizonEnd = Date.parse(schedule.horizonEnd)
-  const horizonDuration = horizonEnd - horizonStart
-  if (!Number.isFinite(horizonDuration) || horizonDuration <= 0) return []
+function displayHorizonTime(value: string, timeZone: string): string {
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return NOT_AVAILABLE
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      hourCycle: 'h23',
+    }).format(new Date(timestamp))
+  } catch {
+    return NOT_AVAILABLE
+  }
+}
 
-  const baseline = data.schedules.find((item) => scheduleKind(item) === 'baseline')
-  const baselineStartByProcess = new Map(
-    baseline?.entries.map((entry) => [entry.processId, Date.parse(entry.startsAt)]) ?? [],
+function BandStrip({ segments, label }: { segments: BandSegment[]; label: string }) {
+  if (segments.length === 0) return null
+  return (
+    <div className={styles.bandStrip} role="img" aria-label={label}>
+      {segments.map((segment) => (
+        <span
+          key={`${segment.band}-${segment.startFraction}`}
+          className={`${styles.band} ${styles[`band_${segment.band}`]}`}
+          style={{
+            left: `${segment.startFraction * 100}%`,
+            width: `${(segment.endFraction - segment.startFraction) * 100}%`,
+          }}
+        />
+      ))}
+    </div>
   )
-  const colorKeys: ScheduleBlock['colorKey'][] = ['roast', 'grind', 'conche', 'temper', 'mould', 'pack']
-
-  return schedule.entries.flatMap((entry, index) => {
-    const start = Date.parse(entry.startsAt)
-    const end = Date.parse(entry.endsAt)
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return []
-    const left = ((start - horizonStart) / horizonDuration) * 24
-    const right = ((end - horizonStart) / horizonDuration) * 24
-    if (right <= 0 || left >= 24) return []
-    const baselineStart = baselineStartByProcess.get(entry.processId)
-    return [{
-      id: entry.id,
-      processName: processName(data, entry.processId),
-      machineId: entry.machineId,
-      start: Math.max(0, left),
-      end: Math.min(24, right),
-      colorKey: colorKeys[index % colorKeys.length],
-      shifted: baselineStart !== undefined && baselineStart !== start,
-    }]
-  })
 }
 
 function Timeline({
   data,
   schedule,
+  baseline,
 }: {
   data: BackendFactoryData
   schedule: StoredSchedule
+  baseline: StoredSchedule | undefined
 }) {
-  const blocksByMachine = useMemo(() => {
-    const grouped = new Map<string, ScheduleBlock[]>()
-    for (const block of blocksForSchedule(data, schedule)) {
-      grouped.set(block.machineId, [...(grouped.get(block.machineId) ?? []), block])
-    }
-    return grouped
-  }, [data, schedule])
+  const start = Date.parse(schedule.horizonStart)
+  const end = Date.parse(schedule.horizonEnd)
+  const validHorizon = Number.isFinite(start) && Number.isFinite(end) && end > start
+  const segments = validHorizon
+    ? horizonSegments(
+      tariffWindows(data.tariffs),
+      start,
+      end,
+      data.factory.timezone,
+      tariffSampleCount(schedule),
+    )
+    : []
+  const generation = generationSegments(data.energy, schedule, data.factory.timezone)
+  const rows = machineRows(data, schedule, baseline)
+  const details = runDetails(data, schedule)
+  const noValidEntries = rows.every((row) => row.blocks.length === 0)
+  const hasMid = segments.some((segment) => segment.band === 'mid')
+  const tariffCurrency = tariffCurrencyNote(data)
+  const changes = [
+    { label: 'Peak price', color: 'var(--band-peak)', shape: 'square' as const },
+    ...(hasMid ? [{ label: 'Mid price', color: 'var(--band-mid)', shape: 'square' as const }] : []),
+    ...(generation.segments.length > 0
+      ? [{ label: `Generation recorded (${generation.source})`, color: 'var(--process-sun)', shape: 'square' as const }]
+      : []),
+    { label: 'Start differs from baseline', color: 'var(--espresso)', shape: 'dashed' as const },
+  ]
+  const displayBlocks = (blocks: ReturnType<typeof machineRows>[number]['blocks']) =>
+    blocks.map((block) => ({
+      id: block.id,
+      processName: block.processName,
+      machineId: block.machineId,
+      start: block.startHour,
+      end: block.endHour,
+      colorKey: LEGACY_COLOR_KEYS[block.colorIndex % LEGACY_COLOR_KEYS.length],
+      processColor: PROCESS_COLOR_KEYS[block.colorIndex % PROCESS_COLOR_KEYS.length],
+      shifted: block.shifted,
+      tooltip: block.tooltip,
+      leftFraction: block.leftFraction,
+      widthFraction: block.widthFraction,
+    }))
 
   return (
-    <div className={styles.timelineScroller}>
-      <div className={styles.timelineInner}>
-        <div className={styles.ruler} aria-hidden="true">
-          {[0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6].map((fraction) => (
-            <span key={fraction}>{clockAtFraction(schedule, fraction, data.factory.timezone)}</span>
-          ))}
-          <span>{clockAtFraction(schedule, 1, data.factory.timezone)}</span>
-        </div>
-        <div className={styles.machineRows}>
-          {[...blocksByMachine].map(([machineId, blocks]) => (
-            <GanttRow
-              key={machineId}
-              label={machineName(data, machineId)}
-              sublabel={`${blocks.length} scheduled ${blocks.length === 1 ? 'process' : 'processes'}`}
-              blocks={blocks}
-              height={44}
-              autoLanes
-            />
-          ))}
-          {blocksByMachine.size === 0 && <p>No valid persisted schedule entries are available.</p>}
+    <>
+      <p className={styles.horizon}>
+        {validHorizon
+          ? `${displayHorizonTime(schedule.horizonStart, data.factory.timezone)} – ${displayHorizonTime(schedule.horizonEnd, data.factory.timezone)} (${data.factory.timezone})`
+          : `Not available (${data.factory.timezone})`}
+      </p>
+      <p className={styles.runMeta}>
+        {details.lines.join(' · ')}
+      </p>
+      {details.warnings.length > 0 && (
+        <details className={styles.warnings}>
+          <summary>Optimizer warnings ({details.warnings.length})</summary>
+          <ul>
+            {details.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </details>
+      )}
+      <Legend items={changes} />
+      {tariffCurrency && <p className={styles.mutedNote}>{tariffCurrency}</p>}
+      {generation.segments.length === 0 && (
+        <p className={styles.mutedNote}>No generation readings fall inside this schedule horizon.</p>
+      )}
+      <div className={styles.timelineScroller}>
+        <div className={styles.timelineInner}>
+          <div className={styles.stripRow}>
+            <strong className={styles.stripLabel}>Energy price</strong>
+            <div className={styles.stripTrack}>
+              <BandStrip
+                segments={segments}
+                label="Configured tariff windows across the schedule horizon"
+              />
+            </div>
+          </div>
+          {generation.segments.length > 0 && (
+            <div className={styles.stripRow}>
+              <strong className={styles.stripLabel}>Generation</strong>
+              <div className={`${styles.stripTrack} ${styles.genTrack}`} role="img" aria-label={`Hours with recorded generation (${generation.source})`}>
+                {generation.segments.map((segment) => (
+                  <span
+                    key={`generation-${segment.startFraction}`}
+                    className={styles.genSegment}
+                    style={{
+                      left: `${segment.startFraction * 100}%`,
+                      width: `${(segment.endFraction - segment.startFraction) * 100}%`,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          <div className={styles.ruler} aria-hidden="true">
+            {rulerLabels(schedule, data.factory.timezone, 7).map((label, index) => (
+              <span key={index}>{label}</span>
+            ))}
+          </div>
+          <div className={styles.machineRows}>
+            {rows.map((row) => (
+              <GanttRow
+                key={row.machineId}
+                label={row.name}
+                sublabel={row.sublabel}
+                blocks={displayBlocks(row.blocks)}
+                height={44}
+                autoLanes
+              />
+            ))}
+            {noValidEntries && <p>No valid persisted schedule entries are available.</p>}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
-}
-
-function changedProcessRows(data: BackendFactoryData) {
-  const baseline = data.schedules.find((schedule) => scheduleKind(schedule) === 'baseline')
-  const optimized = data.schedules.find((schedule) => scheduleKind(schedule) === 'optimized')
-  if (!baseline || !optimized) return []
-
-  const baselineEntries = new Map(baseline.entries.map((entry) => [entry.processId, entry]))
-  return optimized.entries.flatMap((entry) => {
-    const previous = baselineEntries.get(entry.processId)
-    if (!previous || previous.startsAt === entry.startsAt && previous.endsAt === entry.endsAt) return []
-    return [{
-      id: entry.id,
-      process: processName(data, entry.processId),
-      machine: machineName(data, entry.machineId),
-      was: `${displayTimestamp(previous.startsAt, data.factory.timezone)}–${displayTimestamp(previous.endsAt, data.factory.timezone)}`,
-      now: `${displayTimestamp(entry.startsAt, data.factory.timezone)}–${displayTimestamp(entry.endsAt, data.factory.timezone)}`,
-    }]
-  })
 }
 
 export default function SchedulePage() {
@@ -134,19 +222,20 @@ export default function SchedulePage() {
   const schedules = data.schedules
   const initial = schedules.find((schedule) => scheduleKind(schedule) === 'optimized') ?? schedules[0]
   const selected = schedules.find((schedule) => schedule.id === scheduleId) ?? initial
-  const selectedEntries = selected?.entries ?? []
-  const shifted = changedProcessRows(data)
-  const summary = selected ? [
-    { label: 'Schedule status', value: selected.status },
-    { label: 'Energy', value: displayValue(selected.totalEnergyKwh, ' kWh') },
-    { label: 'Energy cost', value: displayValue(selected.totalEnergyCost, ` ${data.factory.currency}`) },
-    { label: 'Scheduled processes', value: selectedEntries.length },
-  ] : []
+  const baseline = schedules.find((schedule) => scheduleKind(schedule) === 'baseline')
+  const optimized = schedules.find((schedule) => scheduleKind(schedule) === 'optimized')
+  const shifted = baseline && optimized ? shiftRows(data, baseline, optimized) : []
+  const comparable = baseline && optimized
+    ? scheduleComparability(baseline, optimized)
+    : null
+  const tiles = selected ? summaryTiles(data, selected, baseline, optimized) : []
+  const modeled = provenanceFor('Modeled')
+  const planned = provenanceFor('Planned')
 
   return (
     <div className={styles.page}>
       <PageHeader
-        eyebrow={data.factory.name}
+        eyebrow={`${data.factory.name} · ${data.factory.timezone}`}
         title="Production schedule"
         actions={
           <SegmentedToggle
@@ -182,23 +271,40 @@ export default function SchedulePage() {
       )}
 
       <section className={styles.summaryGrid} aria-label="Persisted schedule summary">
-        {summary.map((item) => <StatTile key={item.label} label={item.label} value={item.value} />)}
+        {tiles.map((item) => {
+          const provenance = item.key === 'shifted'
+            ? planned
+            : item.value !== NOT_AVAILABLE
+              ? modeled
+              : undefined
+          return (
+            <StatTile
+              key={item.key}
+              label={item.label}
+              value={item.value}
+              sub={item.sub}
+              provenance={provenance ? <ProvenanceTag provenance={provenance} /> : undefined}
+            />
+          )
+        })}
       </section>
 
-      <Card title={selected ? `${scheduleKind(selected) === 'optimized' ? 'Optimized' : scheduleKind(selected) === 'baseline' ? 'Baseline' : selected.name} timeline` : 'Persisted schedule timeline'}>
+      {comparable && !comparable.comparable && (
+        <p role="note" className={styles.comparabilityNote}>
+          Baseline and optimized are not directly comparable: {comparable.reasons.join('; ')}.
+        </p>
+      )}
+
+      <Card
+        title={selected
+          ? `${scheduleKind(selected) === 'optimized' ? 'Optimized' : scheduleKind(selected) === 'baseline' ? 'Baseline' : selected.name} timeline`
+          : 'Persisted schedule timeline'}
+        provenance={selected && planned && allEntriesPlanned(selected) === true
+          ? <ProvenanceTag provenance={planned} />
+          : undefined}
+      >
         {selected ? (
-          <>
-            <p>
-              {displayTimestamp(selected.horizonStart, data.factory.timezone)} – {displayTimestamp(selected.horizonEnd, data.factory.timezone)}
-            </p>
-            <Legend
-              items={[
-                { label: 'Persisted schedule entry', color: 'var(--caramel)', shape: 'square' },
-                { label: 'Start differs from baseline', color: 'var(--teal)', shape: 'dashed' },
-              ]}
-            />
-            <Timeline data={data} schedule={selected} />
-          </>
+          <Timeline data={data} schedule={selected} baseline={baseline} />
         ) : (
           <div className={styles.emptySchedule}>
             <p>No persisted schedules are available for this factory.</p>
@@ -218,19 +324,54 @@ export default function SchedulePage() {
         </Card>
       )}
 
-      <Card title="Changed process timings">
+      <Card
+        title="Shifted processes"
+        provenance={modeled ? <ProvenanceTag provenance={modeled} /> : undefined}
+      >
         {shifted.length ? (
-          <div className={styles.tableScroller}>
-            <table className={styles.shiftTable}>
-              <thead><tr><th scope="col">Process</th><th scope="col">Machine</th><th scope="col">Baseline window</th><th scope="col">Optimized window</th></tr></thead>
-              <tbody>{shifted.map((row) => (
-                <tr key={row.id}>
-                  <th scope="row">{row.process}</th><td>{row.machine}</td><td className={styles.was}>{row.was}</td><td className={styles.now}>{row.now}</td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        ) : <p>{data.schedules.length >= 2 ? 'No process timing changes are present between the persisted schedules.' : 'A persisted baseline and optimized schedule pair is required to compare process timings.'}</p>}
+          <>
+            <p className={styles.mutedNote}>
+              Observed change compares the tariff band and recorded generation at the baseline and optimized start times. It is not a reason recorded by the optimizer. Entry cost change uses persisted per-entry cost.
+            </p>
+            <div className={styles.tableScroller}>
+              <table className={styles.shiftTable}>
+                <thead>
+                  <tr>
+                    <th scope="col">Process</th>
+                    <th scope="col">Machine</th>
+                    <th scope="col">Baseline window</th>
+                    <th scope="col">Optimized window</th>
+                    <th scope="col">Observed change</th>
+                    <th scope="col">Entry cost change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shifted.map((row) => (
+                    <tr key={row.id}>
+                      <th scope="row">{row.process}</th>
+                      <td>{row.machine}</td>
+                      <td className={styles.was}>{row.was}</td>
+                      <td className={styles.now}>{row.now}</td>
+                      <td>
+                        <StatusChip status={CHANGE_STATUS[row.change]}>{row.change}</StatusChip>
+                      </td>
+                      <td>{row.costText}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : baseline && optimized ? (
+          <p>No process timing changes are present between the persisted schedules.</p>
+        ) : (
+          <p>{data.schedules.length >= 2
+            ? 'No process timing changes are present between the persisted schedules.'
+            : 'A persisted baseline and optimized schedule pair is required to compare process timings.'}</p>
+        )}
+        {baseline && optimized && comparable && (
+          <p className={styles.mutedNote}>{comparable.notChecked}</p>
+        )}
       </Card>
     </div>
   )

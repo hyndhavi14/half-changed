@@ -29,3 +29,14 @@
   background: var(--sun-soft);
   color: var(--sun-ink);
 }
+
+.planned {
+  background: var(--prov-planned-bg);
+  color: var(--prov-planned-ink);
+  border: 1px dashed var(--prov-planned-border);
+}
+
+.unavailable {
+  background: var(--prov-unavailable-bg);
+  color: var(--prov-unavailable-ink);
+}

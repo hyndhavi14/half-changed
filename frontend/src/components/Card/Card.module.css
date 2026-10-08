@@ -22,6 +22,14 @@
   margin: 0;
 }
 
+.titleGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .body {
   display: flex;
   flex-direction: column;

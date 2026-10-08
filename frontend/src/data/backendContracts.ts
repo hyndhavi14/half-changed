@@ -196,6 +196,7 @@ export interface FrontendScheduleEntryRef {
   cost: number | null
   quantity: number | null
   sequence: number
+  metadata: Record<string, unknown>
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -246,6 +247,12 @@ function nullableNumber(record: Record<string, unknown>, key: string): number | 
     throw new Error(`Backend record has an invalid ${key}.`)
   }
   return value
+}
+
+export function numericValue(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function numberValue(record: Record<string, unknown>, key: string): number {
@@ -415,6 +422,7 @@ export function mapApiScheduleEntry(value: unknown): FrontendScheduleEntryRef {
     cost: nullableNumber(value, 'cost'),
     quantity: nullableNumber(value, 'quantity'),
     sequence: numberValue(value, 'sequence'),
+    metadata: isRecord(value.metadata) ? value.metadata : {},
   }
 }
 

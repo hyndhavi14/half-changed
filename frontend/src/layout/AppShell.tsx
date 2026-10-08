@@ -2,13 +2,15 @@ import { useState, type FormEvent } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import Button from '../components/Button/Button'
 import Card from '../components/Card/Card'
+import StateCard from '../components/StateCard/StateCard'
 import { useFactory } from '../context/useFactory'
 import { supabase } from '../data/supabase'
 import Sidebar from './Sidebar'
+import { isAuthRequiredError } from './shellStatus'
 import styles from './AppShell.module.css'
 
 export default function AppShell() {
-  const { factories, loading, error, reloadFactories } = useFactory()
+  const { factories, backendData, loading, error, reloadFactories } = useFactory()
   const isHistoricalReplay = useLocation().pathname === '/solarshift-historical'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -31,11 +33,15 @@ export default function AppShell() {
     }
   }
 
-  const requiresSignIn = error?.includes('Authentication required') ?? false
+  const requiresSignIn = isAuthRequiredError(error)
   const dataState = isHistoricalReplay ? null : loading ? (
-    <Card title="Loading factory data…">
-      <p className={styles.stateText}>Please wait while factory data loads.</p>
-    </Card>
+    backendData === null ? (
+      <StateCard
+        kind="loading"
+        title="Loading factory data…"
+        message="Please wait while factory data loads."
+      />
+    ) : null
   ) : requiresSignIn ? (
     <Card title="Sign in to the factory workspace">
       <form onSubmit={(event) => void signIn(event)} className={styles.authForm}>
@@ -64,27 +70,38 @@ export default function AppShell() {
       </form>
     </Card>
   ) : error ? (
-    <Card title="Factory data could not be loaded">
-      <p className={styles.stateText}>{error}</p>
-      <Button variant="primary" onClick={() => void reloadFactories()}>
-        Try again
-      </Button>
-    </Card>
+    <StateCard
+      kind="error"
+      title="Factory data could not be loaded"
+      message={error}
+      action={
+        <Button variant="primary" onClick={() => void reloadFactories()}>
+          Try again
+        </Button>
+      }
+    />
   ) : factories.length === 0 ? (
-    <Card title="No factory data yet">
-      <p className={styles.stateText}>
-        No factories are available from the configured data source.
-      </p>
-      <Button variant="primary" onClick={() => void reloadFactories()}>
-        Try again
-      </Button>
-    </Card>
+    <StateCard
+      kind="empty"
+      title="No factory data yet"
+      message="No factories are available from the configured data source."
+      action={
+        <Button variant="primary" onClick={() => void reloadFactories()}>
+          Try again
+        </Button>
+      }
+    />
   ) : null
 
   return (
     <div className={styles.shell}>
       <Sidebar />
       <main className={styles.main}>
+        {!isHistoricalReplay && loading && backendData !== null && (
+          <p className={styles.inlineStatus} role="status" aria-live="polite">
+            Loading the selected factory…
+          </p>
+        )}
         {dataState ?? <Outlet />}
       </main>
     </div>

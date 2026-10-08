@@ -79,18 +79,18 @@
   font-size: 14px;
 }
 
-.utilization {
+.plannedLoad {
   flex: 1 1 170px;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.utilization > :first-child {
+.plannedLoad > :first-child {
   flex: 1;
 }
 
-.utilization > strong {
+.plannedLoad > strong {
   width: 44px;
   color: var(--espresso);
   font-size: 15px;
@@ -162,4 +162,113 @@
   .machineRow {
     align-items: flex-start;
   }
+}
+
+/* ---- Phase 4: dashboard restoration ---- */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.recordCaption {
+  margin: -4px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.emptyMessage {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.emptySchedule {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.emptySchedule p {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.sourceNote {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.mutedText {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.dayPicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.dayPicker select {
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  background: var(--white);
+  color: var(--espresso);
+  font: inherit;
+}
+
+.bandStrip {
+  position: relative;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.band_peak {
+  background: var(--band-peak);
+}
+
+.band_mid {
+  background: var(--band-mid);
+}
+
+.band_off {
+  background: var(--band-off);
+}
+
+.dayAxis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.ganttBand {
+  margin-left: 114px;
+}
+
+.ganttBand .bandStrip {
+  margin-top: 0;
 }

@@ -42,6 +42,7 @@
 
 .block {
   position: absolute;
+  z-index: 1;
   top: 5px;
   bottom: 5px;
   overflow: hidden;
@@ -92,6 +93,66 @@
 
 .pack {
   background: var(--olive);
+}
+
+.process-0 {
+  background: var(--process-caramel);
+  color: var(--process-caramel-ink);
+}
+
+.process-1 {
+  background: var(--process-teal);
+  color: var(--process-teal-ink);
+}
+
+.process-2 {
+  background: var(--process-sun);
+  color: var(--process-sun-ink);
+}
+
+.process-3 {
+  background: var(--process-plum);
+  color: var(--process-plum-ink);
+}
+
+.process-4 {
+  background: var(--process-olive);
+  color: var(--process-olive-ink);
+}
+
+.process-5 {
+  background: var(--process-toffee);
+  color: var(--process-toffee-ink);
+}
+
+.process-6 {
+  background: var(--process-grid-brown);
+  color: var(--process-grid-brown-ink);
+}
+
+.process-7 {
+  background: var(--process-terracotta);
+  color: var(--process-terracotta-ink);
+}
+
+.band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.band-peak {
+  background: var(--band-peak);
+}
+
+.band-mid {
+  background: var(--band-mid);
+}
+
+.band-off {
+  background: var(--band-off);
 }
 
 .shifted {

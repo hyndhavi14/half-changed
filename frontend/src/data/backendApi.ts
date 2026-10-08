@@ -8,6 +8,7 @@ import {
   mapApiOrder,
   mapApiSchedule,
   mapApiScheduleEntry,
+  numericValue,
   parseEnergyPage,
   unwrapApiEnvelope,
   type FrontendFactoryRef,
@@ -27,6 +28,7 @@ export interface BackendFactoryData {
     metadata: Record<string, unknown>
     totalEnergyCost: number | null
     totalEnergyKwh: number | null
+    peakDemandKw: number | null
   }>
   optimizationRequests: Record<string, unknown>[]
   optimizationResults: Record<string, unknown>[]
@@ -180,6 +182,7 @@ export async function loadBackendFactory(factoryId: string): Promise<BackendFact
       metadata,
       totalEnergyCost: numeric(detail.total_energy_cost),
       totalEnergyKwh: numeric(detail.total_energy_kwh),
+      peakDemandKw: numeric(detail.peak_demand_kw),
     }
   }))
   return {
@@ -211,7 +214,5 @@ async function listEnergyRows(path: string): Promise<Record<string, unknown>[]> 
 }
 
 function numeric(value: unknown): number | null {
-  if (value === null || value === undefined) return null
-  const parsed = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(parsed) ? parsed : null
+  return numericValue(value)
 }

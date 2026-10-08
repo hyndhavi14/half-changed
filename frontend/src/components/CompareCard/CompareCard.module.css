@@ -22,6 +22,14 @@
   font-weight: 700;
 }
 
+.compareHeading > .changeBad {
+  color: var(--terra-ink);
+}
+
+.compareHeading > .changeNeutral {
+  color: var(--text-2);
+}
+
 .compareBarRow {
   display: flex;
   align-items: center;

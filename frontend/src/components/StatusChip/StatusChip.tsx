@@ -7,6 +7,10 @@ export type StatusKind =
   | 'Saved'
   | 'Solar'
   | 'Peak'
+  | 'Active'
+  | 'Inactive'
+  | 'Planned'
+  | 'Not available'
 
 interface StatusChipProps {
   status: StatusKind
@@ -20,13 +24,16 @@ const CLASSES: Record<StatusKind, string> = {
   Maintenance: styles.terra,
   Peak: styles.terra,
   Solar: styles.solar,
+  Active: styles.running,
+  Inactive: styles.idle,
+  Planned: styles.planned,
+  'Not available': styles.unavailable,
 }
 
 export default function StatusChip({ status, children }: StatusChipProps) {
   return (
     <span
       className={`${styles.chip} ${CLASSES[status]}`}
-      aria-label={status}
     >
       {children ?? status}
     </span>

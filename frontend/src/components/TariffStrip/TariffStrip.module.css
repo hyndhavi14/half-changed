@@ -1,0 +1,27 @@
+.strip {
+  display: flex;
+  gap: 4px;
+}
+
+.cell {
+  flex: 1;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.peak {
+  background: var(--terracotta);
+}
+
+.mid {
+  background: var(--tariff-mid);
+}
+
+.off {
+  background: var(--tariff-off);
+}
+
+.none {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+}

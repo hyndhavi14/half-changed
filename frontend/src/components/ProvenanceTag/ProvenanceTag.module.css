@@ -1,0 +1,51 @@
+.tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 20px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.recorded {
+  background: var(--prov-recorded-bg);
+  color: var(--prov-recorded-ink);
+  border: 1px solid var(--prov-recorded-border);
+}
+
+.measured {
+  background: var(--prov-measured-bg);
+  color: var(--prov-measured-ink);
+}
+
+.modeled {
+  background: var(--prov-modeled-bg);
+  color: var(--prov-modeled-ink);
+}
+
+.planned {
+  background: var(--prov-planned-bg);
+  color: var(--prov-planned-ink);
+  border: 1px dashed var(--prov-planned-border);
+}
+
+.assumption {
+  background: var(--prov-assumption-bg);
+  color: var(--prov-assumption-ink);
+}
+
+.unavailable {
+  background: var(--prov-unavailable-bg);
+  color: var(--prov-unavailable-ink);
+}
+
+.unclassified {
+  background: var(--prov-unclassified-bg);
+  color: var(--prov-unclassified-ink);
+  border: 1px dashed var(--prov-unclassified-border);
+}

@@ -15,6 +15,13 @@
   line-height: 1.2;
 }
 
+.labelRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .value {
   font-family: var(--font-display);
   font-size: 27px;
@@ -22,4 +29,10 @@
   color: var(--espresso);
   line-height: 1.1;
   margin: 0;
+}
+
+.sub {
+  margin: 2px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
 }
