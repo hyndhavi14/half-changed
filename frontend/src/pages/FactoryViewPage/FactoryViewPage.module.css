@@ -476,3 +476,17 @@
     transition: none;
   }
 }
+
+/* ---- Phases 8-9: current data inside the original layout ---- */
+.flowNote {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.threeDActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
