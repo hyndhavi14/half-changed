@@ -218,9 +218,10 @@ export function compareMetrics(
   baseline: StoredSchedule | undefined,
   optimized: StoredSchedule | undefined,
   currency: string,
-): CompareMetric[] {
+): Array<CompareMetric & { changeTone: DeltaTone }> {
   if (!baseline || !optimized) return []
-  const metrics: CompareMetric[] = []
+  // changeTone colours the change text: green only when the change is an improvement.
+  const metrics: Array<CompareMetric & { changeTone: DeltaTone }> = []
   for (const key of COMPARE_KEYS) {
     const pair = metricPair(key, baseline, optimized)
     if (pair.baseline === null || pair.optimized === null || pair.baseline < 0 || pair.optimized < 0) continue
@@ -241,6 +242,7 @@ export function compareMetrics(
       baselinePct: largest === 0 ? 100 : (pair.baseline / largest) * 100,
       optimizedPct: largest === 0 ? 100 : (pair.optimized / largest) * 100,
       change,
+      changeTone: deltaTone(pair),
     })
   }
   return metrics

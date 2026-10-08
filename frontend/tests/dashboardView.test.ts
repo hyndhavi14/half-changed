@@ -102,6 +102,9 @@ test('compare metrics require both schedules', () => {
   assert.equal(cost?.change, '40% lower')
   assert.equal(cost?.optimizedPct, 60)
   assert.equal(metrics.find((metric) => metric.label === 'Planned energy')?.change, 'No change')
+  assert.equal(cost?.changeTone, 'good')
+  assert.equal(metrics.find((metric) => metric.label === 'Makespan')?.changeTone, 'bad')
+  assert.equal(metrics.find((metric) => metric.label === 'Planned energy')?.changeTone, 'neutral')
 })
 
 test('energy days and rows are split by factory-local day', () => {
