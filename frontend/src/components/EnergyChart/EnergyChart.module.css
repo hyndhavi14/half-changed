@@ -26,6 +26,16 @@
   justify-content: flex-end;
 }
 
+.measuredColumn {
+  flex-direction: row;
+  align-items: flex-end;
+}
+
+.measuredColumn > .solarBar,
+.measuredColumn > .gridBar {
+  width: 50%;
+}
+
 .solarBar,
 .gridBar {
   width: 100%;

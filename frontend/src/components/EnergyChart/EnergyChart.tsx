@@ -1,20 +1,42 @@
 import type { HourEnergy } from '../../data/types'
 import styles from './EnergyChart.module.css'
 
+export interface MeasuredEnergyPoint {
+  hour: number
+  generationKwh: number
+  consumptionKwh: number
+}
+
 interface EnergyChartProps {
-  energyByHour: HourEnergy[]
+  energyByHour?: HourEnergy[]
+  measuredEnergy?: MeasuredEnergyPoint[]
+  firstSeriesLabel?: string
+  secondSeriesLabel?: string
   height?: number
   showNote?: boolean
 }
 
 export default function EnergyChart({
-  energyByHour,
+  energyByHour = [],
+  measuredEnergy,
+  firstSeriesLabel = 'Solar',
+  secondSeriesLabel = 'Grid',
   height = 180,
   showNote = false,
 }: EnergyChartProps) {
+  const measured = measuredEnergy !== undefined
+  const points = measured
+    ? measuredEnergy
+    : energyByHour.map((hour) => ({
+        hour: hour.hour,
+        generationKwh: hour.solarKwh,
+        consumptionKwh: hour.gridKwh,
+      }))
   const maxEnergy = Math.max(
     1,
-    ...energyByHour.map((hour) => hour.solarKwh + hour.gridKwh),
+    ...points.map((hour) => measured
+      ? Math.max(hour.generationKwh, hour.consumptionKwh)
+      : hour.generationKwh + hour.consumptionKwh),
   )
 
   return (
@@ -22,39 +44,43 @@ export default function EnergyChart({
       <div
         className={styles.chartScroller}
         role="img"
-        aria-label="Hourly solar and grid energy use"
+        aria-label={measured
+          ? `Hourly ${firstSeriesLabel.toLowerCase()} and ${secondSeriesLabel.toLowerCase()}`
+          : 'Hourly solar and grid energy use'}
       >
         <div className={styles.chartInner}>
           <div className={styles.chartBars} style={{ height }}>
-            {energyByHour.map((hour) => (
+            {points.map((hour) => (
               <div
-                className={styles.chartColumn}
+                className={`${styles.chartColumn}${measured ? ` ${styles.measuredColumn}` : ''}`}
                 key={hour.hour}
-                title={`${String(hour.hour).padStart(2, '0')}:00 — solar ${hour.solarKwh} kWh, grid ${hour.gridKwh} kWh`}
+                title={`${String(hour.hour).padStart(2, '0')}:00 — ${firstSeriesLabel.toLowerCase()} ${hour.generationKwh} kWh, ${secondSeriesLabel.toLowerCase()} ${hour.consumptionKwh} kWh`}
                 aria-hidden="true"
               >
                 <div
                   className={styles.solarBar}
-                  style={{ height: `${(hour.solarKwh / maxEnergy) * height}px` }}
+                  style={{ height: `${(hour.generationKwh / maxEnergy) * height}px` }}
                 />
                 <div
-                  className={`${styles.gridBar}${hour.solarKwh === 0 ? ` ${styles.gridBarTop}` : ''}`}
-                  style={{ height: `${(hour.gridKwh / maxEnergy) * height}px` }}
+                  className={`${styles.gridBar}${!measured && hour.generationKwh === 0 ? ` ${styles.gridBarTop}` : ''}`}
+                  style={{ height: `${(hour.consumptionKwh / maxEnergy) * height}px` }}
                 />
               </div>
             ))}
           </div>
-          <div className={styles.tariffStrip} aria-hidden="true">
-            {energyByHour.map((hour) => (
+          {!measured && (
+            <div className={styles.tariffStrip} aria-hidden="true">
+              {energyByHour.map((hour) => (
               <div
                 className={`${styles.tariffBar} ${styles[`tariff-${hour.tariff}`]}`}
                 key={hour.hour}
                 title={`${String(hour.hour).padStart(2, '0')}:00 · ${hour.tariff} tariff`}
               />
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
           <div className={styles.hourLabels} aria-hidden="true">
-            {energyByHour.map((hour) => (
+            {points.map((hour) => (
               <span key={hour.hour}>
                 {hour.hour % 3 === 0 ? String(hour.hour).padStart(2, '0') : ''}
               </span>
