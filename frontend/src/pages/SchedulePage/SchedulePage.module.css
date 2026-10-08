@@ -280,3 +280,10 @@
     max-width: 100%;
   }
 }
+
+/* Long multi-day windows wrap so every column fits at desktop width. */
+.shiftTable .was,
+.shiftTable .now {
+  min-width: 120px;
+  white-space: normal;
+}
