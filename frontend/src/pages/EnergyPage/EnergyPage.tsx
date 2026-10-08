@@ -6,9 +6,12 @@ import Legend from '../../components/Legend/Legend'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import ProgressBar from '../../components/ProgressBar/ProgressBar'
 import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
+import ImpactTile from '../../components/ImpactTile/ImpactTile'
 import StatTile from '../../components/StatTile/StatTile'
 import { useFactory } from '../../context/useFactory'
 import { displayTimestamp, displayValue, findStoredSchedule } from '../../data/backendView'
+import { optimizationOutcome, schedulePair, solarAvailableKwh, type ScheduleTotals } from '../../data/factoryInsight'
+import { formatCurrency, formatKwh, formatPercent } from '../../data/format'
 import {
   NOT_AVAILABLE,
   energyDays,
@@ -42,6 +45,10 @@ const BAND_COLORS: Record<BandKey, string> = {
   none: 'var(--tan)',
 }
 
+function gridShare(totals: ScheduleTotals): number | null {
+  return totals.gridKwh !== null && totals.energyKwh !== null && totals.energyKwh > 0 ? (totals.gridKwh / totals.energyKwh) * 100 : null
+}
+
 function rowText(row: Record<string, unknown>, key: string): string {
   const value = row[key]
   return typeof value === 'string' || typeof value === 'number' ? String(value) : NOT_AVAILABLE
@@ -62,6 +69,10 @@ export default function EnergyPage() {
   const totals = plannedTotals(optimized)
   const modeledTag = <ProvenanceTag provenance="modeled" />
   const tileSub = optimized ? 'Optimized schedule' : 'No optimized schedule yet'
+  const outcome = optimizationOutcome(schedulePair(data))
+  const solarAvailable = solarAvailableKwh(data, optimized)
+  const utilization = solarAvailable && outcome.optimized.solarKwh !== null ? (outcome.optimized.solarKwh / solarAvailable) * 100 : null
+  const utilizationBaseline = solarAvailable && outcome.baseline.solarKwh !== null && outcome.comparable ? (outcome.baseline.solarKwh / solarAvailable) * 100 : null
 
   const days = energyDays(data.energy, timeZone)
   const fallbackDay = defaultEnergyDay(data.energy, timeZone)
@@ -95,34 +106,77 @@ export default function EnergyPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader eyebrow={`${data.factory.name} · ${timeZone}`} title="Energy analysis" />
+      <PageHeader eyebrow={`${data.factory.name} · ${timeZone}`} title="Energy, solar & savings" />
 
-      <div className={styles.stats}>
-        <StatTile
-          label="Total energy"
-          value={formatEnergy(totals.totalKwh)}
-          sub={tileSub}
-          provenance={totals.totalKwh === null ? undefined : modeledTag}
-        />
-        <StatTile
-          label="Solar used"
-          value={formatEnergy(totals.solarKwh)}
-          sub={totals.solarSharePct === null ? tileSub : `${formatNumber(totals.solarSharePct)}% of planned energy`}
-          provenance={totals.solarKwh === null ? undefined : modeledTag}
-        />
-        <StatTile
-          label="Grid used"
-          value={formatEnergy(totals.gridKwh)}
-          sub={tileSub}
-          provenance={totals.gridKwh === null ? undefined : modeledTag}
-        />
-        <StatTile
-          label="Energy cost"
-          value={formatMoney(totals.cost, currency)}
-          sub={chargesNote ? 'Energy only, excludes other charges' : tileSub}
-          provenance={totals.cost === null ? undefined : modeledTag}
-        />
-      </div>
+      <section className={styles.impact} aria-label="What SolarShift achieved">
+        <div className={styles.impactHead}>
+          <h2>What SolarShift achieved</h2>
+          <p>
+            {outcome.comparable
+              ? 'Optimized schedule compared with the baseline schedule for the same processes and horizon. All values are modeled by the optimizer, not metered savings.'
+              : 'A comparable baseline and optimized schedule pair is needed before savings can be shown. Run the optimizer from the dashboard.'}
+          </p>
+        </div>
+        <div className={styles.impactGrid}>
+          <ImpactTile
+            label="Grid energy saved"
+            value={outcome.gridSavedKwh === null ? NOT_AVAILABLE : formatKwh(outcome.gridSavedKwh)}
+            sub={outcome.gridSavedKwh === null ? undefined : `${formatKwh(outcome.baseline.gridKwh)} → ${formatKwh(outcome.optimized.gridKwh)}`}
+            tone={outcome.gridSavedKwh === null ? 'neutral' : outcome.gridSavedKwh > 0 ? 'good' : outcome.gridSavedKwh < 0 ? 'bad' : 'neutral'}
+            provenance={outcome.gridSavedKwh === null ? undefined : modeledTag}
+          />
+          <ImpactTile
+            label="Modeled cost saved"
+            value={outcome.costSaved === null ? NOT_AVAILABLE : formatCurrency(outcome.costSaved, currency)}
+            sub={outcome.costSaved === null ? undefined : `${formatCurrency(outcome.baseline.cost, currency)} → ${formatCurrency(outcome.optimized.cost, currency)}${outcome.costSavedPct === null ? '' : ` · ${formatPercent(outcome.costSavedPct, 1)} lower`}`}
+            tone={outcome.costSaved === null ? 'neutral' : outcome.costSaved > 0 ? 'good' : outcome.costSaved < 0 ? 'bad' : 'neutral'}
+            provenance={outcome.costSaved === null ? undefined : modeledTag}
+          />
+          <ImpactTile
+            label="Solar used"
+            value={formatKwh(outcome.optimized.solarKwh)}
+            sub={outcome.solarGainKwh === null ? 'Optimized schedule' : `${outcome.solarGainKwh >= 0 ? '+' : '−'}${formatKwh(Math.abs(outcome.solarGainKwh))} vs baseline`}
+            tone="solar"
+            provenance={outcome.optimized.solarKwh === null ? undefined : modeledTag}
+          />
+          <ImpactTile
+            label="Grid dependency"
+            value={gridShare(outcome.optimized) === null ? NOT_AVAILABLE : formatPercent(gridShare(outcome.optimized), 1)}
+            sub={outcome.gridDependencyChangePts === null ? 'Share of planned energy from the grid' : `was ${formatPercent(gridShare(outcome.baseline), 1)} · ${outcome.gridDependencyChangePts <= 0 ? '−' : '+'}${formatNumber(Math.abs(outcome.gridDependencyChangePts))} points`}
+            tone={outcome.gridDependencyChangePts === null ? 'neutral' : outcome.gridDependencyChangePts < 0 ? 'good' : outcome.gridDependencyChangePts > 0 ? 'bad' : 'neutral'}
+            provenance={gridShare(outcome.optimized) === null ? undefined : modeledTag}
+          />
+        </div>
+        <div className={styles.stats}>
+          <StatTile
+            label="Solar available"
+            value={solarAvailable === null ? NOT_AVAILABLE : formatKwh(solarAvailable)}
+            sub={solarAvailable === null ? 'Solar data not available for this factory’s horizon' : 'Across the planning horizon'}
+            provenance={solarAvailable === null || !dayTag ? undefined : <ProvenanceTag provenance={dayTag.provenance} label={dayTag.label} />}
+          />
+          <StatTile
+            label="Solar utilization"
+            value={utilization === null ? NOT_AVAILABLE : formatPercent(utilization, 1)}
+            sub={utilizationBaseline === null ? 'Solar used ÷ solar available' : `was ${formatPercent(utilizationBaseline, 1)} in the baseline`}
+            provenance={utilization === null ? undefined : modeledTag}
+          />
+          <StatTile
+            label="Grid energy"
+            value={formatKwh(outcome.optimized.gridKwh)}
+            sub={tileSub}
+            provenance={outcome.optimized.gridKwh === null ? undefined : modeledTag}
+          />
+          <StatTile
+            label="Modeled cost"
+            value={formatMoney(totals.cost, currency)}
+            sub={chargesNote ? 'Energy only, excludes other charges' : tileSub}
+            provenance={totals.cost === null ? undefined : modeledTag}
+          />
+        </div>
+        {currency !== 'INR' && (
+          <p className={styles.currencyNote}>Costs for {data.factory.name} are stored in {currency} and shown as stored. They are not converted to ₹.</p>
+        )}
+      </section>
 
       <Card
         title="Hourly energy use"

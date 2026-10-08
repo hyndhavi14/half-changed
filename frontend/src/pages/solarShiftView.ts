@@ -211,3 +211,124 @@ export function clockText(value: unknown): string {
 }
 
 export const BAND_LABEL: Record<ApercBand, string> = { peak: 'Peak', normal: 'Normal', off_peak: 'Off-peak' }
+
+// ---------------------------------------------------------------- Historical replay visuals
+
+const HOUR_MS = 3_600_000
+const SCENARIO_TZ = 'Asia/Kolkata'
+
+function time(value: unknown): number | null {
+  if (typeof value !== 'string') return null
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/** "11–18 Mar 2026" from the manifest's local window (end exclusive), in Asia/Kolkata. */
+export function scenarioDateRange(manifest: JsonRecord): string {
+  const start = time(manifest.local_start) ?? time(manifest.selected_utc_start)
+  const endExclusive = time(manifest.local_end_exclusive) ?? time(manifest.selected_utc_end_exclusive)
+  if (start === null || endExclusive === null || endExclusive <= start) return NOT_AVAILABLE
+  const end = endExclusive - 60_000
+  const day = new Intl.DateTimeFormat('en-GB', { timeZone: SCENARIO_TZ, day: 'numeric' })
+  const full = new Intl.DateTimeFormat('en-GB', { timeZone: SCENARIO_TZ, day: 'numeric', month: 'short', year: 'numeric' })
+  const month = new Intl.DateTimeFormat('en-GB', { timeZone: SCENARIO_TZ, month: 'short', year: 'numeric' })
+  return month.format(start) === month.format(end)
+    ? `${day.format(start)}–${full.format(end)}`
+    : `${full.format(start)} – ${full.format(end)}`
+}
+
+type HistoricalBand = 'peak' | 'mid' | 'off'
+const BAND_MAP: Record<ApercBand, HistoricalBand> = { peak: 'peak', normal: 'mid', off_peak: 'off' }
+
+function localMinute(instant: number): number {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: SCENARIO_TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(instant))
+  return Number(parts.find((part) => part.type === 'hour')?.value ?? 0) * 60 + Number(parts.find((part) => part.type === 'minute')?.value ?? 0)
+}
+
+/** APERC band at an instant from the stored local-time windows (end 00:00 = midnight). */
+export function scenarioBandAt(tariffs: readonly JsonRecord[], instant: number): HistoricalBand | null {
+  const minute = localMinute(instant)
+  for (const segment of tariffDaySegments(tariffs)) {
+    if (minute >= segment.startFraction * 1440 && minute < segment.endFraction * 1440) return BAND_MAP[segment.band]
+  }
+  return null
+}
+
+export interface ScenarioHour {
+  start: number
+  solarKw: number | null
+  baselineKw: number
+  optimizedKw: number
+  band: HistoricalBand | null
+}
+
+/** Hourly modeled PV (kWh in an hour = average kW) with baseline / optimized demand from the stored entries. */
+export function scenarioHourly(scenario: Pick<ScenarioData, 'hourlyProfile' | 'schedules' | 'entries' | 'tariffs'>): ScenarioHour[] {
+  const demand = (kind: 'baseline' | 'optimized') => scheduleEntries(scenario, scheduleFor(scenario, kind)).flatMap((entry) => {
+    const start = time(entry.starts_at)
+    const end = time(entry.ends_at)
+    const kw = toNumber(entry.power_kw)
+    return start !== null && end !== null && kw !== null && end > start ? [{ start, end, kw }] : []
+  })
+  const baseline = demand('baseline')
+  const optimized = demand('optimized')
+  const average = (intervals: typeof baseline, start: number, end: number) =>
+    intervals.reduce((total, interval) => total + interval.kw * Math.max(0, Math.min(end, interval.end) - Math.max(start, interval.start)), 0) / (end - start)
+  return scenario.hourlyProfile.flatMap((hour) => {
+    const start = time(hour.timestamp_utc)
+    if (start === null) return []
+    const end = start + HOUR_MS
+    return [{
+      start,
+      solarKw: toNumber(hour.modeled_pv_kwh),
+      baselineKw: average(baseline, start, end),
+      optimizedKw: average(optimized, start, end),
+      band: scenario.tariffs.length ? scenarioBandAt(scenario.tariffs, start + HOUR_MS / 2) : null,
+    }]
+  }).sort((left, right) => left.start - right.start)
+}
+
+export interface ScenarioLane {
+  id: string
+  code: string
+  name: string
+  baseline: Array<{ id: string; label: string; start: number; end: number; moved: boolean; powerKw: number | null }>
+  optimized: Array<{ id: string; label: string; start: number; end: number; moved: boolean; powerKw: number | null }>
+}
+
+/** Machine lanes (in first-use order) with baseline and optimized blocks for the replay timeline. */
+export function scenarioLanes(scenario: Pick<ScenarioData, 'machines' | 'processes' | 'schedules' | 'entries'>): { lanes: ScenarioLane[]; window: { start: number; end: number } | null } {
+  const baselineEntries = scheduleEntries(scenario, scheduleFor(scenario, 'baseline'))
+  const optimizedEntries = scheduleEntries(scenario, scheduleFor(scenario, 'optimized'))
+  const processNames = new Map(scenario.processes.map((process) => [process.id, text(process.name)]))
+  const baselineStart = new Map(baselineEntries.map((entry) => [entry.process_id, time(entry.starts_at)]))
+  const moved = new Set(optimizedEntries.filter((entry) => {
+    const before = baselineStart.get(entry.process_id)
+    const after = time(entry.starts_at)
+    return before !== null && before !== undefined && after !== null && Math.abs(after - before) >= 60_000
+  }).map((entry) => entry.process_id))
+  const order: string[] = []
+  for (const entry of [...baselineEntries, ...optimizedEntries]) {
+    if (typeof entry.machine_id === 'string' && !order.includes(entry.machine_id)) order.push(entry.machine_id)
+  }
+  const machineNames = new Map(scenario.machines.map((machine) => [machine.id, text(machine.name)]))
+  const blocks = (entries: JsonRecord[], machineId: string) => entries.flatMap((entry) => {
+    const start = time(entry.starts_at)
+    const end = time(entry.ends_at)
+    if (entry.machine_id !== machineId || start === null || end === null || end <= start) return []
+    return [{ id: text(entry.id), label: text(processNames.get(entry.process_id)), start, end, moved: moved.has(entry.process_id), powerKw: toNumber(entry.power_kw) }]
+  })
+  const width = Math.max(2, String(order.length).length)
+  const lanes = order.map((machineId, index) => ({
+    id: machineId,
+    code: `M${String(index + 1).padStart(width, '0')}`,
+    name: text(machineNames.get(machineId)),
+    baseline: blocks(baselineEntries, machineId),
+    optimized: blocks(optimizedEntries, machineId),
+  }))
+  const all = lanes.flatMap((lane) => [...lane.baseline, ...lane.optimized])
+  if (all.length === 0) return { lanes, window: null }
+  const start = Math.floor(Math.min(...all.map((block) => block.start)) / HOUR_MS) * HOUR_MS - HOUR_MS
+  const end = Math.ceil(Math.max(...all.map((block) => block.end)) / HOUR_MS) * HOUR_MS + HOUR_MS
+  return { lanes, window: { start, end } }
+}

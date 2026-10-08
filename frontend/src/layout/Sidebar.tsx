@@ -10,13 +10,11 @@ import styles from './Sidebar.module.css'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', number: 1 },
-  { to: '/processes', label: 'Processes & Machines', number: 2 },
-  { to: '/schedule', label: 'Production Schedule', number: 3 },
-  { to: '/energy', label: 'Energy Analysis', number: 4 },
-  { to: '/compare', label: 'Baseline vs Optimized', number: 5 },
-  { to: '/builder', label: 'Factory Builder', number: 6 },
-  { to: '/factory-view', label: 'Factory View (2D / 3D)', number: 7 },
-  { to: '/solarshift-historical', label: 'SolarShift Historical Replay', number: 8 },
+  { to: '/factory', label: 'Factory / Production', number: 2 },
+  { to: '/schedule', label: 'Schedule', number: 3 },
+  { to: '/energy', label: 'Energy', number: 4 },
+  { to: '/solarshift', label: 'SolarShift', number: 5 },
+  { to: '/3d', label: '3D Factory', number: 6 },
 ]
 
 export default function Sidebar() {
@@ -92,7 +90,7 @@ export default function Sidebar() {
         {!isHistoricalReplay && (
           <div className={styles.factoryPicker}>
             <label htmlFor="factory-select" className={styles.eyebrow}>
-              Factory
+              Select factory
             </label>
             <select
               id="factory-select"
@@ -110,7 +108,7 @@ export default function Sidebar() {
         )}
 
         <ul className={styles.navList}>
-          {NAV_ITEMS.slice(0, 7).map((item) => (
+          {NAV_ITEMS.map((item) => (
             <li key={item.to}>
               <NavLink
                 to={item.to}
@@ -131,35 +129,6 @@ export default function Sidebar() {
                       {item.number}
                     </span>
                     {item.label}
-                  </>
-                )}
-              </NavLink>
-            </li>
-          ))}
-          <li className={styles.navDivider} aria-hidden="true" />
-          {NAV_ITEMS.slice(7).map((item) => (
-            <li key={item.to}>
-              <NavLink
-                to={item.to}
-                onClick={() => setMenuOpen(false)}
-                className={({ isActive }) =>
-                  `${styles.navLink}${isActive ? ` ${styles.active}` : ''}`
-                }
-              >
-                {({ isActive }) => (
-                  <>
-                    <span
-                      className={`${styles.badge}${
-                        isActive ? ` ${styles.badgeActive}` : ''
-                      }`}
-                      aria-hidden="true"
-                    >
-                      {item.number}
-                    </span>
-                    <span>
-                      {item.label}
-                      <span className={styles.navCaption}>Public replay</span>
-                    </span>
                   </>
                 )}
               </NavLink>

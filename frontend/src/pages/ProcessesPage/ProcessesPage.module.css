@@ -85,3 +85,74 @@
   min-width: 180px;
   white-space: normal;
 }
+
+/* Factory / Production page */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 14px;
+}
+
+.flowScroller {
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.flow {
+  display: flex;
+  gap: 14px;
+  min-width: max-content;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flowStage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 220px;
+  padding: 12px;
+  border: 1px solid var(--zone-border);
+  border-radius: var(--radius-tile);
+  background: var(--floor-bg);
+}
+
+.flowStage:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -12px;
+  width: 10px;
+  height: 10px;
+  border-top: 2.5px solid var(--caramel);
+  border-right: 2.5px solid var(--caramel);
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.flowStageLabel {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.flowProcess {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--milk);
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.flowProcess strong {
+  color: var(--espresso);
+  font-size: 15px;
+}

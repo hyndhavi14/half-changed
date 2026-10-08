@@ -1,0 +1,154 @@
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  min-width: 0;
+}
+
+.body {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.yAxis {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 46px;
+  height: 220px;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scroller {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.plot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.columns {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 220px;
+  border-bottom: 1.5px solid var(--line-strong);
+  background-image: linear-gradient(to bottom, var(--line-soft) 1px, transparent 1px);
+  background-size: 100% 50%;
+}
+
+.column {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  font: inherit;
+}
+
+button.column { cursor: pointer; }
+button.column:hover { background: rgba(59, 36, 22, 0.05); }
+button.column:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 1px; }
+
+.surplus { background: rgba(227, 167, 47, 0.1); }
+.selected { box-shadow: inset 0 0 0 2px var(--espresso); }
+
+.solar,
+.fromSolar,
+.fromGrid {
+  position: absolute;
+  bottom: 0;
+}
+
+.solar {
+  left: 0;
+  right: 0;
+  border-top: 2px solid var(--sun);
+  border-radius: 4px 4px 0 0;
+  background: var(--sun-soft);
+}
+
+.fromSolar {
+  left: 22%;
+  right: 22%;
+  background: var(--sun);
+}
+
+.fromGrid {
+  left: 22%;
+  right: 22%;
+  border-radius: 3px 3px 0 0;
+  background: var(--grid-brown);
+}
+
+.bands {
+  display: flex;
+  gap: 2px;
+}
+
+.bands span {
+  flex: 1;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.band_peak { background: var(--terracotta); }
+.band_mid { background: var(--tariff-mid); }
+.band_off { background: var(--tariff-off); }
+.band_none { background: transparent; }
+
+.xAxis {
+  display: flex;
+  gap: 2px;
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.xAxis span {
+  flex: 1;
+  min-width: 0;
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--text-2);
+  font-size: var(--fs-caption);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend i {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.legend strong { color: var(--terra-ink); }
+
+.keySolar { background: var(--sun-soft); border-top: 2px solid var(--sun); }
+.keyFromSolar { background: var(--sun); }
+.keyFromGrid { background: var(--grid-brown); }
+.keyPeak { background: var(--terracotta); }
+.keyMid { background: var(--tariff-mid); }
+.keyOff { background: var(--tariff-off); }

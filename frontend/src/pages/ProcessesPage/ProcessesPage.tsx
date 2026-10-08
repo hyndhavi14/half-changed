@@ -1,14 +1,15 @@
-import { useState } from 'react'
 import Card from '../../components/Card/Card'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import ProgressBar from '../../components/ProgressBar/ProgressBar'
 import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
+import StatTile from '../../components/StatTile/StatTile'
 import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
 import { displayTimestamp, displayValue, findStoredSchedule, machineName, processName } from '../../data/backendView'
 import { NOT_AVAILABLE, plannedLoadPct } from '../DashboardPage/dashboardView'
-import { FactoryFloorPlan } from '../FactoryViewPage/FactoryViewPage'
-import { flowPlan } from '../FactoryViewPage/factoryViewModel'
+import { machineLabels } from '../../data/factoryInsight'
+import { formatDuration } from '../../data/format'
+import { processStages } from '../../data/stageView'
 import styles from './ProcessesPage.module.css'
 
 function dependencyText(type: string, lag: number): string {
@@ -18,23 +19,55 @@ function dependencyText(type: string, lag: number): string {
 
 export default function ProcessesPage() {
   const { backendData, loading, error } = useFactory()
-  const [selectedMachineId, setSelectedMachineId] = useState('')
   if (!backendData) {
     return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
   }
 
   const data = backendData
   const optimized = findStoredSchedule(data, 'optimized')
-  const plan = flowPlan(data)
-  const stageOf = new Map<string, string>()
-  for (const zone of plan.zones) for (const id of zone.machineIds) stageOf.set(id, `${zone.number}. ${zone.title}`)
+  const labels = machineLabels(data)
+  const labelOf = new Map(labels.map((label) => [label.id, label]))
+  const flow = processStages(data.processes, data.dependencies)
+  const activeCount = data.processes.filter((process) => process.isActive).length
   const parents = (processId: string) => data.dependencies.filter((edge) => edge.processId === processId)
 
   return (
     <div className={styles.page}>
-      <PageHeader eyebrow={`${data.factory.name} · ${data.factory.timezone}`} title="Processes & machines" />
+      <PageHeader eyebrow={`${data.factory.name} · ${data.factory.timezone}`} title={`${data.factory.name} · production`} />
 
-      <FactoryFloorPlan data={data} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} />
+      <section className={styles.stats} aria-label="Factory configuration">
+        <StatTile label="Machines" value={data.machines.length} sub={`${data.machines.filter((machine) => machine.isActive).length} active`} />
+        <StatTile label="Processes" value={data.processes.length} sub={`${activeCount} active`} />
+        <StatTile label="Dependencies" value={data.dependencies.length} sub="process order rules" />
+        <StatTile label="Production orders" value={data.orders.length} sub="stored, not scheduled" />
+      </section>
+
+      <Card title="Production flow" provenance={<ProvenanceTag provenance="recorded" label="Factory configuration" />}>
+        <p className={styles.note}>
+          {flow.cyclic
+            ? 'The stored dependencies form a cycle, so processes are listed without stages.'
+            : 'Stages follow the stored process dependencies: each stage starts after the one before it finishes.'}
+        </p>
+        <div className={styles.flowScroller} tabIndex={0} role="region" aria-label="Production flow, scrollable">
+          <ol className={styles.flow}>
+            {flow.stages.map((stage, index) => (
+              <li key={stage.index} className={styles.flowStage}>
+                <span className={styles.flowStageLabel}>Stage {index + 1}</span>
+                {stage.processes.map((process) => {
+                  const label = labelOf.get(process.machineId)
+                  return (
+                    <div key={process.id} className={styles.flowProcess}>
+                      <strong>{process.name}</strong>
+                      <span>{label ? label.label : 'Unknown machine'}</span>
+                      <span>{formatDuration(process.durationMinutes)} · {displayValue(process.powerRequirementKw, ' kW')}</span>
+                    </div>
+                  )
+                })}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </Card>
 
       <Card title="All machines" className={styles.machineCard} provenance={optimized ? <ProvenanceTag provenance="planned" /> : undefined}>
         <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="All machines table, scrollable">
@@ -44,6 +77,7 @@ export default function ProcessesPage() {
             </caption>
             <thead>
               <tr>
+                <th scope="col">Code</th>
                 <th scope="col">Machine</th>
                 <th scope="col">Stage</th>
                 <th scope="col">Type</th>
@@ -57,8 +91,9 @@ export default function ProcessesPage() {
                 const load = optimized ? plannedLoadPct(optimized, machine.id) : null
                 return (
                   <tr key={machine.id}>
+                    <td>{labelOf.get(machine.id)?.code ?? '—'}</td>
                     <th scope="row">{machine.name}</th>
-                    <td>{stageOf.get(machine.id) ?? 'No assigned process'}</td>
+                    <td>{labelOf.get(machine.id)?.stage ? `Stage ${labelOf.get(machine.id)?.stage}` : 'No assigned process'}</td>
                     <td>{machine.type ? machine.type.replaceAll('_', ' ') : NOT_AVAILABLE}</td>
                     <td>{displayValue(machine.ratedPowerKw, ' kW')}</td>
                     <td><StatusChip status={machine.isActive ? 'Active' : 'Inactive'} /></td>
@@ -74,7 +109,7 @@ export default function ProcessesPage() {
                 )
               })}
               {data.machines.length === 0 && (
-                <tr><td colSpan={6}>No machines are stored for this factory.</td></tr>
+                <tr><td colSpan={7}>No machines are stored for this factory.</td></tr>
               )}
             </tbody>
           </table>
@@ -107,8 +142,8 @@ export default function ProcessesPage() {
                 return (
                   <tr key={process.id}>
                     <th scope="row">{process.name}</th>
-                    <td>{machineName(data, process.machineId)}</td>
-                    <td>{displayValue(process.durationMinutes, ' min')}</td>
+                    <td>{labelOf.get(process.machineId)?.label ?? machineName(data, process.machineId)}</td>
+                    <td>{formatDuration(process.durationMinutes)}</td>
                     <td>{displayValue(process.powerRequirementKw, ' kW')}</td>
                     <td>{process.quantity === null ? NOT_AVAILABLE : `${process.quantity}${process.unit ? ` ${process.unit}` : ''}`}</td>
                     <td className={styles.wrapCell}>
@@ -127,7 +162,7 @@ export default function ProcessesPage() {
           </table>
         </div>
         <p className={styles.note}>
-          The optimizer enforces durations, machine assignment, one process per machine at a time and finish-to-start dependencies with zero lag.
+          The optimizer enforces durations, machine assignment, one process per machine at a time and finish-to-start dependencies. Every stored process is treated as flexible; fixed processes and time windows are not configurable yet.
         </p>
       </Card>
 

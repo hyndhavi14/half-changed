@@ -230,7 +230,7 @@ export function FactoryFloorPlan({
 
 export default function FactoryViewPage() {
   const { backendData, loading, error } = useFactory()
-  const [view, setView] = useState<ViewType>('2d')
+  const [view, setView] = useState<ViewType>('3d')
   const [selectedMachineId, setSelectedMachineId] = useState('')
   if (!backendData) {
     return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
@@ -247,7 +247,7 @@ export default function FactoryViewPage() {
     <div className={styles.page}>
       <PageHeader
         eyebrow={`${data.factory.name} · ${view === '3d' ? 'Factory-3D replay' : '2D production flow'}`}
-        title="Factory view"
+        title="3D factory"
         actions={
           <div className={styles.viewActions}>
             <span className={styles.viewLabel}>View type</span>
@@ -291,6 +291,9 @@ export default function FactoryViewPage() {
             <h2>{data.factory.name} {'·'} 3D model</h2>
             <p>
               Factory-3D replays a stored schedule in an illustrative 3D scene. It is not a live view of machines and does not show telemetry.
+            </p>
+            <p>
+              3D visualization is currently available for selected factory configurations: the scene is modelled on the chocolate plant layout. Machines of {data.factory.name} without a scene position are listed as unplaced, so the 2D floor plan is the reliable layout view for other factories.
             </p>
             <div className={styles.threeDActions}>
               {optimized && (

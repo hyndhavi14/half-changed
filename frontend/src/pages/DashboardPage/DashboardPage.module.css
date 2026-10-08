@@ -1,274 +1,184 @@
+.optimizationError {
+  margin: 0 0 12px;
+  color: var(--terra-ink);
+}
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 26px;
+  border-radius: var(--radius-card);
+  background: var(--espresso);
+  color: var(--cream);
+}
+
+.summary_good { box-shadow: inset 6px 0 0 var(--sun); }
+.summary_neutral { box-shadow: inset 6px 0 0 var(--tan); }
+.summary_bad { box-shadow: inset 6px 0 0 var(--terracotta); }
+
+.summaryCopy {
+  display: flex;
+  flex: 1 1 420px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.summaryEyebrow {
+  color: var(--sun);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.summaryCopy h2 {
+  color: var(--milk);
+  font-size: clamp(22px, 2.2vw, 28px);
+  line-height: 1.2;
+}
+
+.summaryCopy p {
+  margin: 0;
+  color: var(--side-muted);
+  max-width: 70ch;
+}
+
+.summaryFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.summaryFacts span {
+  display: flex;
+  flex-direction: column;
+  min-width: 104px;
+  padding: 10px 14px;
+  border-radius: var(--radius-tile);
+  background: var(--chocolate-2);
+  color: var(--side-muted);
+  font-size: 13px;
+}
+
+.summaryFacts strong {
+  color: var(--milk);
+  font-family: var(--font-display);
+  font-size: 22px;
+}
+
+.hourPicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.hourPicker input {
+  width: min(260px, 40vw);
+  min-height: 44px;
+  accent-color: var(--caramel);
+}
+
+.hourPicker strong {
+  min-width: 82px;
+  color: var(--espresso);
+  font-variant-numeric: tabular-nums;
+}
+
 .kpiGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 14px;
 }
 
 .twoColumnGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
   gap: 16px;
-  align-items: stretch;
+  align-items: start;
 }
 
-.ganttScroller {
-  overflow-x: auto;
-}
-
-.optimizationError {
+.caption {
   margin: 0;
-  color: var(--terra-ink);
+  color: var(--text-2);
+  font-size: var(--fs-caption);
 }
 
-.timelineLink {
-  min-height: 44px;
+.link {
   display: inline-flex;
   align-items: center;
+  min-height: 44px;
   font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
 }
 
-.ganttInner {
-  min-width: 460px;
+.recommendation {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+  min-width: 0;
 }
 
-.timeAxis {
+.sectionTitle {
+  color: var(--espresso);
+  font-size: var(--fs-card-title);
+}
+
+.noRecommendation {
   display: flex;
-  justify-content: space-between;
-  margin-left: 114px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--milk);
+  color: var(--text-2);
+}
+
+.noRecommendation strong { color: var(--espresso); }
+
+.utilization {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.utilRow {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) 72px;
+  align-items: center;
+  gap: 4px 12px;
+  font-size: 14px;
+}
+
+.utilRow strong {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.utilRow small {
+  grid-column: 2 / 4;
   color: var(--text-2);
   font-size: 13px;
-}
-
-.machineList {
-  display: flex;
-  flex-direction: column;
-}
-
-.machineRow {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.machineRow:first-child {
-  padding-top: 0;
-}
-
-.machineRow:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-
-.machineDetails {
-  min-width: 130px;
-  flex: 1 1 130px;
-  display: flex;
-  flex-direction: column;
-}
-
-.machineDetails > span {
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.plannedLoad {
-  flex: 1 1 170px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.plannedLoad > :first-child {
-  flex: 1;
-}
-
-.plannedLoad > strong {
-  width: 44px;
-  color: var(--espresso);
-  font-size: 15px;
-  text-align: right;
-}
-
-.modelSlot {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 24px;
-  padding: 28px;
-  border: 2px dashed var(--toffee);
-  border-radius: 16px;
-  background: var(--sand);
-}
-
-.modelIcon {
-  width: 72px;
-  height: 72px;
-  flex: 0 0 72px;
-  display: grid;
-  place-items: center;
-  border-radius: 16px;
-  background: var(--chocolate);
-  color: var(--sun);
-}
-
-.modelCopy {
-  flex: 1 1 320px;
-}
-
-.modelCopy h2 {
-  margin: 0;
-  font-size: 22px;
-}
-
-.modelCopy p {
-  margin: 4px 0 0;
-  color: var(--text-2);
-}
-
-.modelLink {
-  color: inherit;
-  text-decoration: none;
-}
-
-.modelLinkButton {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 20px;
-  border-radius: var(--radius-control);
-  background: var(--chocolate);
-  color: var(--milk);
-  font-weight: 700;
-}
-
-.modelLink:hover .modelLinkButton {
-  background: var(--chocolate-2);
-}
-
-@media (max-width: 600px) {
-  .modelSlot {
-    padding: 20px;
-  }
-
-  .machineRow {
-    align-items: flex-start;
-  }
-}
-
-/* ---- Phase 4: dashboard restoration ---- */
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.recordCaption {
-  margin: -4px 0 0;
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.emptyMessage {
-  margin: 0;
-  color: var(--text-2);
 }
 
 .emptySchedule {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.emptySchedule p {
-  margin: 0;
-  color: var(--text-2);
-}
-
-.sourceNote {
-  margin: 12px 0 0;
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.mutedText {
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.dayPicker {
-  display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  font-size: 14px;
-  color: var(--text-2);
-}
-
-.dayPicker select {
-  min-height: 44px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-control);
-  background: var(--white);
-  color: var(--espresso);
-  font: inherit;
-}
-
-.bandStrip {
-  position: relative;
-  height: 10px;
-  margin-top: 8px;
-  border-radius: 999px;
-  background: var(--track);
-  overflow: hidden;
-}
-
-.band {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-}
-
-.band_peak {
-  background: var(--band-peak);
-}
-
-.band_mid {
-  background: var(--band-mid);
-}
-
-.band_off {
-  background: var(--band-off);
-}
-
-.dayAxis {
-  display: flex;
   justify-content: space-between;
-  margin-top: 4px;
+  gap: 12px;
+  padding: 18px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-tile);
   color: var(--text-2);
-  font-size: 13px;
 }
 
-.ganttBand {
-  margin-left: 114px;
-}
-
-.ganttBand .bandStrip {
-  margin-top: 0;
-}
+.emptySchedule p { margin: 0; }

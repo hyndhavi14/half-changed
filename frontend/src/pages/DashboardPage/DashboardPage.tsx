@@ -3,366 +3,250 @@ import { Link } from 'react-router-dom'
 import Button from '../../components/Button/Button'
 import Card from '../../components/Card/Card'
 import CompareCard from '../../components/CompareCard/CompareCard'
-import EnergyChart from '../../components/EnergyChart/EnergyChart'
-import GanttRow from '../../components/GanttRow/GanttRow'
+import ConstraintsCard from '../../components/ConstraintsCard/ConstraintsCard'
 import KpiCard from '../../components/KpiCard/KpiCard'
-import Legend from '../../components/Legend/Legend'
+import MoveExplanation from '../../components/MoveExplanation/MoveExplanation'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import ProgressBar from '../../components/ProgressBar/ProgressBar'
 import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
-import StatusChip from '../../components/StatusChip/StatusChip'
+import ScheduleGantt from '../../components/ScheduleGantt/ScheduleGantt'
+import SegmentedToggle from '../../components/SegmentedToggle/SegmentedToggle'
+import SolarDemandChart from '../../components/SolarDemandChart/SolarDemandChart'
 import { useFactory } from '../../context/useFactory'
-import type { BackendFactoryData } from '../../data/backendApi'
-import { displayTimestamp, displayValue, findStoredSchedule } from '../../data/backendView'
-import { PROVENANCE_LABEL, type Provenance } from '../../data/provenance'
-import { PROCESS_COLOR_KEYS, type ProcessColorKey } from '../../data/scheduleView'
-import type { ScheduleBlock, ScheduleColorKey } from '../../data/types'
+import { solarAvailableKwh } from '../../data/factoryInsight'
+import { formatCurrency, formatKw, formatKwh, formatPercent } from '../../data/format'
+import { beforeAfterMetrics, optimizationSummary } from '../../data/insightView'
+import { useFactoryInsight } from '../../data/useFactoryInsight'
 import { sourceTag } from '../sourceProvenance'
-import { dayTariffBands, defaultEnergyDay, fullDayPoints } from '../EnergyPage/energyPageView'
-import { rulerLabels } from '../SchedulePage/schedulePageView'
-import {
-  activeWindow,
-  compareMetrics,
-  energyDays,
-  energySourceLabel,
-  energySourceNote,
-  ganttRows,
-  horizonSegments,
-  kpiViews,
-  plannedLoadPct,
-  recordCountsCaption,
-  rowsForDay,
-  tariffWindows,
-  type BandSegment,
-  type StoredSchedule,
-} from './dashboardView'
+import { energySourceLabel } from './dashboardView'
 import styles from './DashboardPage.module.css'
 
 const PLAY_ICON = (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-    <path
-      d="M8 5.14v13.72L19 12 8 5.14Z"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+    <path d="M8 5v14l11-7z" />
   </svg>
 )
 
-const CUBE_ICON = (
-  <svg width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
-    <path
-      d="m20 4 14 8v16l-14 8-14-8V12l14-8Z"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinejoin="round"
-    />
-    <path d="m6 12 14 8 14-8M20 20v16M13 8l14 8" stroke="currentColor" strokeWidth="2" />
-  </svg>
-)
+const VIEW_OPTIONS = [
+  { value: 'baseline', label: 'Baseline' },
+  { value: 'optimized', label: 'Optimized' },
+]
 
-const KPI_DOTS = ['var(--caramel)', 'var(--sun)', 'var(--teal)', 'var(--plum)']
-const LEGACY_COLOR_KEYS: ScheduleColorKey[] = ['roast', 'grind', 'conche', 'temper', 'mould', 'pack']
-const BAND_LABEL: Record<BandSegment['band'], string> = { peak: 'Peak price', mid: 'Mid price', off: 'Off-peak price' }
-
-// Resolve a provenance key by its visible label so the page follows data/provenance.ts exactly.
-function provenanceFor(label: string): Provenance | undefined {
-  const match = (Object.entries(PROVENANCE_LABEL) as Array<[string, string]>)
-    .find(([, text]) => text.toLowerCase() === label.toLowerCase())
-  return match ? (match[0] as Provenance) : undefined
-}
-
-function tagFor(provenance: Provenance | undefined) {
-  return provenance ? <ProvenanceTag provenance={provenance} /> : undefined
-}
-
-function BandStrip({ segments, label }: { segments: BandSegment[]; label: string }) {
-  if (segments.length === 0) return null
-  const summary = segments
-    .filter((segment) => segment.band !== 'off')
-    .map((segment) => BAND_LABEL[segment.band])
-  return (
-    <div className={styles.bandStrip} role="img" aria-label={`${label}${summary.length ? `: ${[...new Set(summary)].join(', ')}` : ''}`}>
-      {segments.map((segment) => (
-        <span
-          key={`${segment.band}-${segment.startFraction}`}
-          className={`${styles.band} ${styles[`band_${segment.band}`] ?? ''}`}
-          style={{
-            left: `${segment.startFraction * 100}%`,
-            width: `${(segment.endFraction - segment.startFraction) * 100}%`,
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function SchedulePreview({
-  data,
-  schedule,
-  baseline,
-}: {
-  data: BackendFactoryData
-  schedule: StoredSchedule
-  baseline: StoredSchedule | undefined
-}) {
-  const view = activeWindow(schedule)
-  const rows = ganttRows(data, view, baseline)
-  if (rows.length === 0) {
-    return <p className={styles.emptyMessage}>No schedule entries are available for this schedule.</p>
-  }
-  const ticks = rulerLabels(view, data.factory.timezone, 5)
-  const viewHours = (Date.parse(view.horizonEnd) - Date.parse(view.horizonStart)) / 3_600_000
-  const segments = horizonSegments(
-    tariffWindows(data.tariffs),
-    Date.parse(view.horizonStart),
-    Date.parse(view.horizonEnd),
-    data.factory.timezone,
-    Math.min(2016, Math.max(96, Math.ceil(viewHours * 4))),
-  )
-
-  return (
-    <div className={styles.ganttScroller} tabIndex={0} role="region" aria-label="Optimized schedule preview, scrollable">
-      <div className={styles.ganttInner}>
-        <div className={styles.ganttBand}>
-          <BandStrip segments={segments} label="Configured tariff windows across the shown window" />
-        </div>
-        {rows.map((row) => {
-          const blocks: Array<ScheduleBlock & {
-            processColor: ProcessColorKey
-            tooltip: string
-            leftFraction: number
-            widthFraction: number
-          }> = row.blocks.map((block) => ({
-            id: block.id,
-            processName: block.processName,
-            machineId: block.machineId,
-            start: block.startHour,
-            end: block.endHour,
-            colorKey: LEGACY_COLOR_KEYS[block.colorIndex % LEGACY_COLOR_KEYS.length],
-            shifted: block.shifted,
-            processColor: PROCESS_COLOR_KEYS[block.colorIndex % PROCESS_COLOR_KEYS.length],
-            tooltip: block.tooltip,
-            leftFraction: block.leftFraction,
-            widthFraction: block.widthFraction,
-          }))
-          return (
-            <GanttRow
-              key={row.machineId}
-              label={row.machineName}
-              blocks={blocks}
-              height={30}
-              compact
-            />
-          )
-        })}
-        <div className={styles.timeAxis} aria-hidden="true">
-          {ticks.map((tick, index) => <span key={`${tick}-${index}`}>{tick}</span>)}
-        </div>
-      </div>
-    </div>
-  )
+function clock(at: number, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at))
 }
 
 export default function DashboardPage() {
   const { backendData, loading, error, runOptimization, optimizing, optimizationError } = useFactory()
-  const [chosenDay, setChosenDay] = useState<string | null>(null)
-
   if (!backendData) {
-    return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
+    return <PageHeader eyebrow={loading ? 'Loading factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
   }
+  return (
+    <Dashboard
+      key={backendData.factory.id}
+      data={backendData}
+      runOptimization={runOptimization}
+      optimizing={optimizing}
+      optimizationError={optimizationError}
+    />
+  )
+}
 
-  const data = backendData
-  const timeZone = data.factory.timezone
-  const baseline = findStoredSchedule(data, 'baseline')
-  const optimized = findStoredSchedule(data, 'optimized')
-  const kpis = kpiViews(baseline, optimized, data.factory.currency)
-  const comparison = compareMetrics(baseline, optimized, data.factory.currency)
-  const modeled = provenanceFor('Modeled')
-  const planned = provenanceFor('Planned')
+interface DashboardProps {
+  data: NonNullable<ReturnType<typeof useFactory>['backendData']>
+  runOptimization: () => Promise<void>
+  optimizing: boolean
+  optimizationError: string | null
+}
 
-  const days = energyDays(data.energy, timeZone)
-  const selectedDay = chosenDay !== null && days.includes(chosenDay) ? chosenDay : defaultEnergyDay(data.energy, timeZone)
-  const dayRows = selectedDay ? rowsForDay(data.energy, timeZone, selectedDay) : []
-  const hourlyEnergy = selectedDay ? fullDayPoints(data.energy, timeZone, selectedDay) : []
-  const hasEnergy = hourlyEnergy.some((point) => point.generationKwh !== null)
-  const sourceLabel = energySourceLabel(dayRows)
-  const energyTag = sourceTag(sourceLabel)
-  const windows = tariffWindows(data.tariffs)
-  const dayBands = selectedDay && windows.length ? dayTariffBands(windows, selectedDay) : undefined
-  const bandsShown = [...new Set((dayBands ?? []).filter((band): band is BandSegment['band'] => band !== null))]
+function Dashboard({ data, runOptimization, optimizing, optimizationError }: DashboardProps) {
+  const insight = useFactoryInsight(data)
+  const { outcome, series, currency, timeZone, pair } = insight
+  const [view, setView] = useState<'baseline' | 'optimized'>('optimized')
+  const peakSolarIndex = series.reduce((best, point, index) => ((point.solarKw ?? -1) > (series[best]?.solarKw ?? -1) ? index : best), 0)
+  const [hourIndex, setHourIndex] = useState(peakSolarIndex)
+  const point = series[Math.min(hourIndex, Math.max(0, series.length - 1))]
+  const summary = optimizationSummary(outcome, insight.moved.length, insight.recommendation !== null, currency, data.factory.name)
+  const metrics = beforeAfterMetrics(outcome, currency)
+  const solarTag = sourceTag(energySourceLabel(data.energy))
+  const modeled = <ProvenanceTag provenance="modeled" label="Modeled" />
+  const planned = <ProvenanceTag provenance="planned" label="Optimizer output" />
+  const activeProcesses = data.processes.filter((process) => process.isActive).length
+  const scheduled = outcome.optimized.entryCount
+  const available = solarAvailableKwh(data, pair.optimized)
+  const utilization = (solar: number | null) => (solar !== null && available !== null && available > 0 ? (solar / available) * 100 : null)
+  const loadKw = point ? (view === 'baseline' ? point.baselineKw : point.optimizedKw) : null
+  const gridKw = point && loadKw !== null ? Math.max(0, loadKw - (point.solarKw ?? 0)) : null
 
   return (
     <>
       <PageHeader
-        eyebrow={`${data.factory.name} \u00b7 ${timeZone}`}
-        title="Factory dashboard"
+        eyebrow={`${data.factory.name} · ${timeZone}`}
+        title="Solar-aware factory dashboard"
         actions={[
-          <Button
-            key="export"
-            variant="secondary"
-            disabled
-            title="Report export is not available yet"
-            aria-describedby="dashboard-export-note"
-          >
-            Export report
-          </Button>,
-          <Button
-            key="optimize"
-            variant="primary"
-            icon={optimizing ? undefined : PLAY_ICON}
-            isLoading={optimizing}
-            onClick={() => void runOptimization()}
-          >
+          <Button key="optimize" variant="primary" icon={optimizing ? undefined : PLAY_ICON} isLoading={optimizing} onClick={() => void runOptimization()}>
             Run optimization
           </Button>,
         ]}
       />
-      <p id="dashboard-export-note" className={styles.srOnly}>Report export is not available yet.</p>
 
       {optimizationError && (
         <Card title="Optimization failed">
           <p className={styles.optimizationError} role="alert">{optimizationError}</p>
-          <Button variant="primary" isLoading={optimizing} onClick={() => void runOptimization()}>
-            Try again
-          </Button>
+          <Button variant="primary" isLoading={optimizing} onClick={() => void runOptimization()}>Try again</Button>
         </Card>
       )}
 
-      <section className={styles.kpiGrid} aria-label="Factory key performance indicators">
-        {kpis.map((kpi, index) => (
-          <KpiCard
-            key={kpi.key}
-            label={kpi.label}
-            value={kpi.value}
-            delta={kpi.delta}
-            deltaTone={kpi.deltaTone}
-            note={kpi.note}
-            dotColor={KPI_DOTS[index % KPI_DOTS.length]}
-            provenance={kpi.value === 'Not available' ? undefined : tagFor(modeled)}
-          />
-        ))}
+      <section className={`${styles.summary} ${styles[`summary_${summary.tone}`]}`} aria-label="Solar-aware optimization summary">
+        <div className={styles.summaryCopy}>
+          <span className={styles.summaryEyebrow}>Solar-aware optimization</span>
+          <h2>{summary.title}</h2>
+          <p>{summary.text}</p>
+        </div>
+        <div className={styles.summaryFacts}>
+          <span><strong>{data.machines.length}</strong> machines</span>
+          <span><strong>{data.processes.length}</strong> processes</span>
+          <span><strong>{insight.checks ? (insight.checks.withinHorizon && insight.checks.machineConflicts && insight.checks.dependencies !== false ? 'Feasible' : 'Check plan') : '—'}</strong> production plan</span>
+        </div>
       </section>
-      <p className={styles.recordCaption}>{recordCountsCaption(data)}</p>
 
-      <section className={styles.twoColumnGrid} aria-label="Energy and comparison">
-        <Card
-          title="Energy by hour"
-          provenance={energyTag ? <ProvenanceTag provenance={energyTag.provenance} label={energyTag.label} /> : undefined}
-          action={days.length > 1 ? (
-            <label className={styles.dayPicker}>
-              <span>Day</span>
-              <select value={selectedDay} onChange={(event) => setChosenDay(event.target.value)}>
-                {days.map((day) => <option key={day} value={day}>{day}</option>)}
-              </select>
-            </label>
-          ) : undefined}
-        >
-          <Legend
-            items={[
-              { label: 'Generation', color: 'var(--sun)', shape: 'square' },
-              { label: 'Consumption', color: 'var(--grid-brown)', shape: 'square' },
-              ...bandsShown
-                .filter((band) => band !== 'off')
-                .map((band) => ({
-                  label: BAND_LABEL[band],
-                  color: band === 'peak' ? 'var(--terracotta)' : 'var(--tariff-mid)',
-                  shape: 'square' as const,
-                })),
-            ]}
-          />
-          {hasEnergy ? (
-            <EnergyChart
-              measuredEnergy={hourlyEnergy}
-              tariffBands={dayBands}
-              firstSeriesLabel="Generation"
-              secondSeriesLabel="Consumption"
+      <Card
+        title="At a glance"
+        action={series.length > 0 ? (
+          <label className={styles.hourPicker}>
+            <span>Hour</span>
+            <input
+              type="range"
+              min={0}
+              max={series.length - 1}
+              value={Math.min(hourIndex, series.length - 1)}
+              onChange={(event) => setHourIndex(Number(event.target.value))}
+              aria-valuetext={point ? clock(point.start, timeZone) : undefined}
             />
-          ) : (
-            <p className={styles.emptyMessage}>No hourly generation and consumption readings are available for this factory.</p>
-          )}
-          <p className={styles.sourceNote}>
-            {selectedDay ? `${selectedDay} (${timeZone}) \u00b7 ` : ''}{energySourceNote(sourceLabel)}
-            {windows.length > 0 && bandsShown.length === 0 ? ' Tariff windows have a single price, so no peak band is shown.' : ''}
-            {windows.length === 0 ? ' No tariff windows are configured.' : ''}
-          </p>
-        </Card>
-        {comparison.length > 0 ? (
-          <CompareCard compare={comparison} provenance={tagFor(modeled)} />
+            <strong>{point ? clock(point.start, timeZone) : '—'}</strong>
+          </label>
+        ) : undefined}
+      >
+        <div className={styles.kpiGrid}>
+          <KpiCard label="Solar available" value={point && point.solarKw !== null ? formatKw(point.solarKw) : 'Not available'} note={point ? `at ${clock(point.start, timeZone)}` : 'No schedule window'} dotColor="var(--sun)" provenance={solarTag ? <ProvenanceTag provenance={solarTag.provenance} label={solarTag.label} /> : undefined} />
+          <KpiCard label="Factory load" value={loadKw !== null ? formatKw(loadKw) : 'Not available'} note={`planned · ${view} schedule`} dotColor="var(--caramel)" provenance={planned} />
+          <KpiCard label="Grid demand" value={gridKw !== null ? formatKw(gridKw) : 'Not available'} note="load not covered by solar" dotColor="var(--grid-brown)" provenance={modeled} />
+          <KpiCard label="Electricity cost" value={formatCurrency(outcome.optimized.cost, currency)} note="optimized schedule, whole plan" dotColor="var(--terracotta)" provenance={modeled} />
+          <KpiCard
+            label="Modeled cost savings"
+            value={outcome.costSaved !== null ? formatCurrency(outcome.costSaved, currency) : 'Not available'}
+            delta={outcome.costSavedPct === null ? undefined : Math.abs(outcome.costSavedPct) < 0.05 ? 'No change' : `${outcome.costSavedPct > 0 ? '−' : '+'}${formatPercent(Math.abs(outcome.costSavedPct), 1)}`}
+            deltaTone={outcome.costSaved === null ? 'neutral' : outcome.costSaved > 0 ? 'good' : outcome.costSaved < 0 ? 'bad' : 'neutral'}
+            note="vs baseline schedule"
+            dotColor="var(--teal)"
+            provenance={modeled}
+          />
+          <KpiCard
+            label="Production target"
+            value={activeProcesses > 0 && scheduled > 0 ? formatPercent(Math.min(100, (scheduled / activeProcesses) * 100)) : 'Not available'}
+            note={scheduled > 0 ? `${scheduled} of ${activeProcesses} active processes scheduled` : 'No optimized schedule'}
+            dotColor="var(--espresso)"
+            provenance={scheduled > 0 ? planned : undefined}
+          />
+        </div>
+      </Card>
+
+      <Card
+        title="Solar vs factory demand"
+        provenance={solarTag ? <ProvenanceTag provenance={solarTag.provenance} label={`Solar: ${solarTag.label}`} /> : undefined}
+        action={<SegmentedToggle options={VIEW_OPTIONS} value={view} onChange={(value) => setView(value as 'baseline' | 'optimized')} ariaLabel="Schedule shown" />}
+      >
+        {series.length > 0 ? (
+          <>
+            <p className={styles.caption}>Each column is one hour of the plan. Shaded columns have more solar than the factory draws — that is where flexible work can go. Select a column to inspect it.</p>
+            <SolarDemandChart
+              points={series}
+              view={view}
+              timeZone={timeZone}
+              ariaLabel={`Solar availability and ${view} factory demand by hour`}
+              selectedIndex={hourIndex}
+              onSelect={setHourIndex}
+              solarLabel={`Solar available${solarTag ? ` (${solarTag.label.toLowerCase()})` : ''}`}
+            />
+          </>
         ) : (
-          <Card title="Baseline vs optimized">
-            <p className={styles.emptyMessage}>A persisted baseline and optimized schedule pair is required for comparison.</p>
+          <EmptySchedule factoryName={data.factory.name} optimizing={optimizing} runOptimization={runOptimization} />
+        )}
+      </Card>
+
+      <Card
+        title="Machine schedule"
+        provenance={insight.lanes.length ? planned : undefined}
+        action={<Link className={styles.link} to="/schedule">Open schedule →</Link>}
+      >
+        {insight.window && insight.lanes.length > 0 ? (
+          <ScheduleGantt
+            lanes={insight.lanes}
+            window={insight.window}
+            timeZone={timeZone}
+            mode={pair.baseline && pair.optimized ? 'compare' : pair.optimized ? 'optimized' : 'baseline'}
+            bands={insight.bands}
+            ariaLabel={`${data.factory.name} machine schedule`}
+            compact
+          />
+        ) : (
+          <EmptySchedule factoryName={data.factory.name} optimizing={optimizing} runOptimization={runOptimization} />
+        )}
+      </Card>
+
+      <section className={styles.twoColumnGrid} aria-label="Recommendation and comparison">
+        <div className={styles.recommendation}>
+          <h2 className={styles.sectionTitle}>Solar-aware recommendation</h2>
+          {insight.recommendation ? (
+            <MoveExplanation move={insight.recommendation} checks={insight.checks} timeZone={timeZone} currency={currency} variant="hero" />
+          ) : (
+            <div className={styles.noRecommendation}>
+              <strong>No beneficial schedule shift identified for the current optimization.</strong>
+              <span>{outcome.comparable ? 'No process moved to a slot with less grid energy or lower modeled cost.' : 'A comparable baseline and optimized schedule are needed first.'}</span>
+            </div>
+          )}
+        </div>
+        {metrics.length > 0 ? (
+          <CompareCard title="Before vs optimized" compare={metrics} provenance={modeled} />
+        ) : (
+          <Card title="Before vs optimized">
+            <p className={styles.caption}>A comparable baseline and optimized schedule pair is needed for this comparison.</p>
           </Card>
         )}
       </section>
 
-      <section className={styles.twoColumnGrid} aria-label="Schedule and machines">
-        <Card
-          title={optimized && optimized.name.trim().toLowerCase() !== 'optimized schedule' ? `Optimized schedule \u00b7 ${optimized.name}` : 'Optimized schedule'}
-          provenance={optimized ? tagFor(planned) : undefined}
-          action={<Link className={styles.timelineLink} to="/schedule">Open full timeline {'\u2192'}</Link>}
-        >
-          {optimized ? (
-            <>
-              <p className={styles.emptyMessage}>
-                {displayTimestamp(optimized.horizonStart, timeZone)} {'\u2013'} {displayTimestamp(optimized.horizonEnd, timeZone)} ({timeZone})
-              </p>
-              <SchedulePreview data={data} schedule={optimized} baseline={baseline} />
-            </>
-          ) : (
-            <div className={styles.emptySchedule}>
-              <p>No persisted optimized schedule yet.</p>
-              <Button variant="primary" isLoading={optimizing} onClick={() => void runOptimization()}>
-                Run optimization
-              </Button>
-            </div>
-          )}
-        </Card>
-
-        <Card title="Machines" provenance={optimized ? tagFor(planned) : undefined}>
-          <div className={styles.machineList}>
-            {data.machines.length ? data.machines.map((machine) => {
-              const load = plannedLoadPct(optimized, machine.id)
-              return (
-                <div className={styles.machineRow} key={machine.id}>
-                  <div className={styles.machineDetails}>
-                    <strong>{machine.name}</strong>
-                    <span>{displayValue(machine.ratedPowerKw, ' kW rated')}</span>
-                  </div>
-                  <StatusChip status={machine.isActive ? 'Active' : 'Inactive'} />
-                  <div className={styles.plannedLoad}>
-                    {load === null ? (
-                      <span className={styles.mutedText}>Planned load: Not available</span>
-                    ) : (
-                      <>
-                        <ProgressBar value={load} color="var(--teal)" ariaLabel={`${machine.name} planned load`} />
-                        <strong>{Math.round(load)}%</strong>
-                      </>
-                    )}
-                  </div>
+      <section className={styles.twoColumnGrid} aria-label="Constraints and solar utilization">
+        <ConstraintsCard checks={insight.checks} />
+        <Card title="Solar utilization" provenance={modeled}>
+          {available !== null ? (
+            <div className={styles.utilization}>
+              <p className={styles.caption}>Share of the solar energy available over the planning horizon ({formatKwh(available)}) that each schedule uses.</p>
+              {[
+                { label: 'Baseline', value: utilization(outcome.baseline.solarKwh), kwh: outcome.baseline.solarKwh, color: 'var(--tan)' },
+                { label: 'Optimized', value: utilization(outcome.optimized.solarKwh), kwh: outcome.optimized.solarKwh, color: 'var(--teal)' },
+              ].map((item) => (
+                <div className={styles.utilRow} key={item.label}>
+                  <span>{item.label}</span>
+                  <ProgressBar value={item.value ?? 0} color={item.color} height={14} ariaLabel={`${item.label} solar utilization`} />
+                  <strong>{item.value !== null ? formatPercent(item.value, 1) : 'Not available'}</strong>
+                  <small>{formatKwh(item.kwh)} used</small>
                 </div>
-              )
-            }) : <p className={styles.emptyMessage}>No machines are persisted for this factory.</p>}
-          </div>
-          {data.machines.length > 0 && (
-            <p className={styles.sourceNote}>
-              Planned load is the share of the optimized schedule horizon each machine is booked. It is planned, not measured machine activity.
-            </p>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.caption}>Solar data not available for this factory’s planning horizon.</p>
           )}
         </Card>
-      </section>
-
-      <section className={styles.modelSlot} aria-label="Factory floor view">
-        <div className={styles.modelIcon}>{CUBE_ICON}</div>
-        <div className={styles.modelCopy}>
-          <h2>{data.factory.name} {'\u00b7'} Factory view</h2>
-          <p>View persisted machine and process records. A physical floor layout or live machine telemetry is not available from the current Backend data.</p>
-        </div>
-        <Link className={styles.modelLink} to="/factory-view">
-          <span className={styles.modelLinkButton}>Open factory view</span>
-        </Link>
       </section>
     </>
+  )
+}
+
+function EmptySchedule({ factoryName, optimizing, runOptimization }: { factoryName: string; optimizing: boolean; runOptimization: () => Promise<void> }) {
+  return (
+    <div className={styles.emptySchedule}>
+      <p>{factoryName} has no stored schedule yet.</p>
+      <Button variant="primary" isLoading={optimizing} onClick={() => void runOptimization()}>Run optimization</Button>
+    </div>
   )
 }

@@ -218,3 +218,15 @@
 .active .navCaption {
   color: var(--chocolate);
 }
+
+/* The factory selector is the platform's primary control. */
+.factoryPicker {
+  margin: 0 4px;
+  padding: 12px;
+  border-radius: var(--radius-tile);
+  background: var(--chocolate-2);
+}
+
+.factoryPicker .eyebrow {
+  color: var(--sun);
+}

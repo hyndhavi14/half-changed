@@ -44,8 +44,14 @@ export function formatEnergy(value: number | null): string {
   return value === null ? NOT_AVAILABLE : `${formatNumber(value)} kWh`
 }
 
+/** Money with the currency's own symbol (₹, €) as stored; never converted. */
 export function formatMoney(value: number | null, currency: string): string {
-  return value === null ? NOT_AVAILABLE : `${currency} ${formatNumber(value, 2)}`
+  if (value === null) return NOT_AVAILABLE
+  try {
+    return new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+  } catch {
+    return `${currency} ${formatNumber(value, 2)}`
+  }
 }
 
 // ---------------------------------------------------------------- recorded readings

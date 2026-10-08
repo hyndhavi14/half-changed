@@ -313,3 +313,140 @@
     gap: 8px;
   }
 }
+
+/* Historical SolarShift — story-first layout */
+.hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 24px 26px;
+  border-radius: var(--radius-card);
+  background: var(--espresso);
+  color: var(--cream);
+}
+
+.heroEyebrow {
+  color: var(--sun);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hero h2 {
+  margin: 0;
+  color: var(--milk);
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.4vw, 30px);
+  line-height: 1.2;
+}
+
+.hero p {
+  margin: 0;
+  max-width: 80ch;
+  color: var(--side-muted);
+}
+
+.hero .heroNote {
+  color: var(--sun);
+  font-weight: 700;
+}
+
+.story {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: story;
+}
+
+.story li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: var(--radius-tile);
+  background: var(--chocolate-2);
+}
+
+.story strong {
+  color: var(--milk);
+  font-size: 15px;
+}
+
+.story small {
+  color: var(--side-muted);
+  font-size: 13px;
+}
+
+.storyTag {
+  align-self: flex-start;
+  margin-bottom: 4px;
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--sun);
+  color: var(--chocolate);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.scenarioBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.impactGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 16px;
+}
+
+.flowLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.flowLine span {
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--sand);
+  font-weight: 700;
+}
+
+.flowLine b {
+  color: var(--teal-ink);
+}
+
+.details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--milk);
+}
+
+.details summary {
+  min-height: 52px;
+  padding: 14px 20px;
+  color: var(--espresso);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.detailsBody {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 0 20px 20px;
+}
