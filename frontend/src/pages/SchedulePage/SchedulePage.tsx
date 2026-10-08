@@ -159,7 +159,7 @@ function Timeline({
       {generation.segments.length === 0 && (
         <p className={styles.mutedNote}>No generation readings fall inside this schedule horizon.</p>
       )}
-      <div className={styles.timelineScroller}>
+      <div className={styles.timelineScroller} tabIndex={0} role="region" aria-label="Schedule timeline, scrollable">
         <div className={styles.timelineInner}>
           <div className={styles.stripRow}>
             <strong className={styles.stripLabel}>Energy price</strong>
@@ -333,7 +333,7 @@ export default function SchedulePage() {
             <p className={styles.mutedNote}>
               Observed change compares the tariff band and recorded generation at the baseline and optimized start times. It is not a reason recorded by the optimizer. Entry cost change uses persisted per-entry cost.
             </p>
-            <div className={styles.tableScroller}>
+            <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="Shifted processes table, scrollable">
               <table className={styles.shiftTable}>
                 <thead>
                   <tr>

@@ -490,7 +490,7 @@ export default function BuilderPage() {
         </Button>
       }
     >
-      <div className={styles.tableScroller}>
+      <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="Machines table, scrollable">
         <table className={styles.machineTable}>
           <thead>
             <tr>

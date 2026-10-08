@@ -213,3 +213,8 @@
     display: flex;
   }
 }
+
+/* Caption stays readable on the highlighted (active) navigation item. */
+.active .navCaption {
+  color: var(--chocolate);
+}

@@ -40,7 +40,7 @@ export default function DataTable({
 
   return (
     <>
-      <div className={styles.scroller}>
+      <div className={styles.scroller} tabIndex={0} role="region" aria-label={`${caption}, scrollable`}>
         <table className={styles.table}>
           <caption className={captionVisible ? undefined : 'visually-hidden'}>{caption}</caption>
           <thead>

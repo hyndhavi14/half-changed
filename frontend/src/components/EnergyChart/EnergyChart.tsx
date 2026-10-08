@@ -59,6 +59,7 @@ export default function EnergyChart({
     <div className={styles.energyChart}>
       <div
         className={styles.chartScroller}
+        tabIndex={0}
         role="img"
         aria-label={measured
           ? `Hourly ${firstSeriesLabel.toLowerCase()} and ${secondSeriesLabel.toLowerCase()}`

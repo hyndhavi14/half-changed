@@ -37,7 +37,7 @@ export default function ProcessesPage() {
       <FactoryFloorPlan data={data} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} />
 
       <Card title="All machines" className={styles.machineCard} provenance={optimized ? <ProvenanceTag provenance="planned" /> : undefined}>
-        <div className={styles.tableScroller}>
+        <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="All machines table, scrollable">
           <table className={styles.machineTable}>
             <caption className={styles.visuallyHidden}>
               Machines, flow stages, types, rated power, configuration state and planned load
@@ -85,7 +85,7 @@ export default function ProcessesPage() {
       </Card>
 
       <Card title="All processes" className={styles.machineCard}>
-        <div className={styles.tableScroller}>
+        <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="All processes table, scrollable">
           <table className={styles.machineTable}>
             <caption className={styles.visuallyHidden}>
               Processes with machine, duration, power, quantity, dependencies and configuration state
@@ -132,7 +132,7 @@ export default function ProcessesPage() {
       </Card>
 
       <Card title="Production orders" className={styles.machineCard}>
-        <div className={styles.tableScroller}>
+        <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="Production orders table, scrollable">
           <table className={styles.machineTable}>
             <caption className={styles.visuallyHidden}>Stored production orders</caption>
             <thead>

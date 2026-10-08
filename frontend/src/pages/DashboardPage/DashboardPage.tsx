@@ -123,7 +123,7 @@ function SchedulePreview({
   )
 
   return (
-    <div className={styles.ganttScroller}>
+    <div className={styles.ganttScroller} tabIndex={0} role="region" aria-label="Optimized schedule preview, scrollable">
       <div className={styles.ganttInner}>
         <div className={styles.ganttBand}>
           <BandStrip segments={segments} label="Configured tariff windows across the shown window" />

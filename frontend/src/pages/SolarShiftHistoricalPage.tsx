@@ -108,7 +108,7 @@ function ScheduleTable({ scenario, kind }: { scenario: ScenarioData; kind: 'base
       {entries.length === 0 ? (
         <p className={styles.missing}>Persisted {kind} schedule entries are unavailable.</p>
       ) : (
-        <div className={styles.tableWrap}>
+        <div className={styles.tableWrap} tabIndex={0} role="region" aria-label="Schedule entries table, scrollable">
           <table className={styles.table}>
             <thead>
               <tr>
@@ -211,7 +211,7 @@ function ScenarioCard({ scenario }: { scenario: ScenarioData }) {
             ))}
           </div>
           <div className={styles.bandAxis} aria-hidden="true"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
-          <div className={styles.tableWrap}>
+          <div className={styles.tableWrap} tabIndex={0} role="region" aria-label="APERC tariff windows table, scrollable">
             <table className={styles.table}>
               <thead><tr><th scope="col">Local window</th><th scope="col">Band</th><th scope="col">Price</th><th scope="col">Basis</th></tr></thead>
               <tbody>
@@ -279,7 +279,7 @@ function Overview({ scenarios }: { scenarios: ScenarioData[] }) {
   const rows = scenarios.map(overviewRow)
   return (
     <Card title="HGD and LGD at a glance" provenance={<ProvenanceTag provenance="modeled" />}>
-      <div className={styles.tableWrap}>
+      <div className={styles.tableWrap} tabIndex={0} role="region" aria-label="HGD and LGD overview table, scrollable">
         <table className={styles.table}>
           <caption className={styles.visuallyHidden}>Solar resource, modeled PV and modeled energy cost for each historical week</caption>
           <thead>

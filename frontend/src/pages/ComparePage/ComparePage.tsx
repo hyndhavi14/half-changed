@@ -107,7 +107,7 @@ export default function ComparePage() {
             { label: 'Start differs from baseline', color: 'var(--espresso)', shape: 'dashed' },
           ]}
         />
-        <div className={styles.timelineScroller}>
+        <div className={styles.timelineScroller} tabIndex={0} role="region" aria-label="Schedule timelines, scrollable">
           <div className={styles.timelineInner}>
             <div className={styles.stripRow}>
               <span className={styles.stripLabel}>Energy price</span>
@@ -135,7 +135,7 @@ export default function ComparePage() {
         <p className={styles.note}>
           Observed change compares the tariff band and recorded generation at the baseline and optimized start times. It is not a reason recorded by the optimizer. Entry cost change uses persisted per-entry cost.
         </p>
-        <div className={styles.tableScroller}>
+        <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="Shifted processes table, scrollable">
           <table className={styles.shiftTable}>
             <caption className={styles.visuallyHidden}>
               Process timing differences between the persisted baseline and optimized schedules
