@@ -482,14 +482,15 @@ export function hourlySeries(input: {
   const points: HourPoint[] = []
   for (let start = input.window.start; start < input.window.end; start += HOUR_MS) {
     const end = Math.min(start + HOUR_MS, input.window.end)
-    const middle = start + (end - start) / 2
     points.push({
       start,
       solarKw: input.solarKw(start, end),
       baselineKw: averageDemand(input.baseline, start, end),
       optimizedKw: averageDemand(input.optimized, start, end),
-      band: input.band(middle),
-      price: input.price(middle),
+      // Same rule as the backend's tariff_profile (lib/optimizer/pythonPayload.ts): the price in
+      // force at the start of each hour, so the chart shows exactly what the optimizer was given.
+      band: input.band(start),
+      price: input.price(start),
     })
   }
   return points
@@ -574,4 +575,17 @@ export function solarAvailableKwh(data: Pick<BackendFactoryData, 'energy'>, sche
   if (start === null || end === null || end <= start) return null
   const average = averageSolarKw(solarSamples(data.energy), start, end)
   return average === null ? null : average * ((end - start) / HOUR_MS)
+}
+
+/**
+ * Data-supported reasons for one move: more solar in the new slot, a lower average tariff,
+ * or that it follows a predecessor that moved. Empty when none of these is true.
+ */
+export function moveReasons(move: ProcessMove, moves: readonly ProcessMove[], dependencies: BackendFactoryData['dependencies']): string[] {
+  const reasons: string[] = []
+  if (move.baselineSolarKw !== null && move.optimizedSolarKw !== null && move.optimizedSolarKw > move.baselineSolarKw + 1e-6) reasons.push('More solar')
+  if (move.baselinePrice !== null && move.optimizedPrice !== null && move.optimizedPrice < move.baselinePrice - 1e-9) reasons.push('Lower tariff')
+  const movedIds = new Set(moves.filter((item) => item.moved).map((item) => item.processId))
+  if (dependencies.some((dependency) => dependency.processId === move.processId && movedIds.has(dependency.dependsOnProcessId))) reasons.push('Follows a moved process')
+  return reasons
 }

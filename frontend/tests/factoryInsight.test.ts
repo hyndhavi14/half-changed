@@ -111,3 +111,13 @@ test('hourly series and Gantt lanes follow the selected factory only', () => {
   assert.equal(lanes[1].optimized[0].moved, true)
   assert.equal(lanes[1].optimized[0].label, 'Compression')
 })
+
+test('move reasons come only from solar, tariff and dependency evidence', async () => {
+  const { moveReasons } = await import('../src/data/factoryInsight.ts')
+  const pair = schedulePair(chocolate)
+  const moves = processMoves(chocolate, pair)
+  const refining = moves.find((move) => move.processName === 'Refining')!
+  assert.deepEqual(moveReasons(refining, moves, (chocolate as { dependencies: never }).dependencies), ['More solar', 'Lower tariff'])
+  const roasting = moves.find((move) => move.processName === 'Roasting')!
+  assert.deepEqual(moveReasons(roasting, moves, (chocolate as { dependencies: never }).dependencies), [])
+})

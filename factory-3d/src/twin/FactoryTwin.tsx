@@ -9,6 +9,8 @@ import { useViewStore } from '../state/viewStore';
 import { useMachineStore } from '../state/machineStore';
 import { useEnergyStore } from '../state/energyStore';
 import { useScheduleStore } from '../state/scheduleStore';
+import { usePlanStore } from '../state/planStore';
+import { dateIn } from '../data/planned';
 import { CAMERA, PRESETS, type PresetKey } from '../config/cameraPresets';
 import { LAYOUT_BY_ID, type MachineId } from '../config/layout';
 import { FactoryScene } from '../three/scene/FactoryScene';
@@ -89,6 +91,8 @@ export function FactoryTwin({
     const layoutId = machine.layout_id ?? machine.machine_id;
     return !Object.prototype.hasOwnProperty.call(LAYOUT_BY_ID, layoutId as MachineId);
   });
+  const planTimeZone = usePlanStore((s) => s.timeZone);
+  const planFactory = usePlanStore((s) => s.factoryName);
   const knownMachineIds = new Set(Object.values(machines).map((machine) => machine.machine_id));
   const orphanedScheduleEntries = selectedSchedule?.entries.filter(
     (entry) => !knownMachineIds.has(entry.machine_id),
@@ -169,15 +173,13 @@ export function FactoryTwin({
           {scheduleError && <p>Selected schedule could not be loaded: {scheduleError}</p>}
           {selectedSchedule && (
             <p>
-              Planned schedule v{selectedSchedule.version} · {selectedSchedule.status} ·{' '}
-              {selectedSchedule.horizon_start} to {selectedSchedule.horizon_end}
+              <strong>{planFactory ? `${planFactory} · ` : ''}{selectedSchedule.name}</strong>
+              {' '}· {selectedSchedule.entries.length} planned runs ·{' '}
+              {dateIn(planTimeZone, Date.parse(selectedSchedule.horizon_start))} – {dateIn(planTimeZone, Date.parse(selectedSchedule.horizon_end))}
             </p>
           )}
           {unplaced.length > 0 && (
-            <p>
-              {unplaced.length} backend machine(s) have no scene placement and are not shown:{' '}
-              {unplaced.map((machine) => `${machine.name} (${machine.machine_id})`).join(', ')}
-            </p>
+            <p>Not in the 3D layout: {unplaced.map((machine) => machine.name).join(', ')}</p>
           )}
           {orphanedScheduleEntries.length > 0 && (
             <p>

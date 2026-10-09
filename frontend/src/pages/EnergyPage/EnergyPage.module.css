@@ -132,3 +132,11 @@
   color: var(--text-2);
   font-size: var(--fs-caption);
 }
+
+.emptyImpact {
+  margin: 0;
+  padding: 18px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-tile);
+  color: var(--text-2);
+}

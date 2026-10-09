@@ -5,67 +5,6 @@
   min-width: 0;
 }
 
-.equation {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: stretch;
-  gap: 12px;
-}
-
-.equation > b {
-  align-self: center;
-  color: var(--caramel);
-  font-family: var(--font-display);
-  font-size: 32px;
-}
-
-.term {
-  display: flex;
-  flex: 1 1 220px;
-  flex-direction: column;
-  gap: 6px;
-  padding: 20px 22px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-card);
-  background: var(--milk);
-}
-
-.term span {
-  color: var(--text-3);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.term strong {
-  color: var(--espresso);
-  font-family: var(--font-display);
-  font-size: 21px;
-}
-
-.term small {
-  color: var(--text-2);
-  font-size: 14px;
-}
-
-.solar {
-  border: 1.5px solid var(--sun);
-  background: var(--sun-soft);
-}
-
-.solar span,
-.solar small { color: var(--sun-ink); }
-
-.result {
-  border-color: var(--teal);
-  background: var(--teal);
-}
-
-.result span,
-.result small { color: var(--teal-soft); }
-.result strong { color: var(--milk); }
-
 .note {
   margin: 0 0 14px;
   color: var(--text-2);
@@ -92,3 +31,79 @@
 }
 
 .empty strong { color: var(--espresso); }
+
+.impact {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.impact > div {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-tile);
+  background: var(--milk);
+}
+
+.impact dt {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.impact dd {
+  margin: 4px 0 0;
+  color: var(--espresso);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--milk);
+}
+
+.steps strong {
+  color: var(--espresso);
+  font-family: var(--font-display);
+  font-size: 19px;
+}
+
+.steps small {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.steps .solar { background: var(--sun-soft); border-color: var(--sun); }
+.steps .result { background: var(--teal-soft); border-color: var(--teal); }
+.steps .result strong { color: var(--teal-ink); }
+
+.stepNo {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--espresso);
+  color: var(--milk);
+  font-size: 14px;
+  font-weight: 700;
+}

@@ -544,9 +544,9 @@ describe('optimizer configuration reading', () => {
     expect(config.solvePath).toBe('')
   })
 
-  it('defaults the timeout to 60 seconds', () => {
+  it('defaults the timeout to 180 seconds (two solver runs of up to 60 seconds each)', () => {
     setEnv({ BYTEME_OPTIMIZER_ENABLED: 'false' })
-    expect(readOptimizerConfig().timeoutMs).toBe(60_000)
+    expect(readOptimizerConfig().timeoutMs).toBe(180_000)
   })
 
   it('refuses an optimizer timeout above the five-minute ceiling', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { factory3dUrl, flowPlan, glyphKind, machinePlan } from '../src/pages/FactoryViewPage/factoryViewModel.ts'
+import { factory3dEmbedUrl, factory3dUrl, flowPlan, machineActivity } from '../src/pages/FactoryViewPage/factoryViewModel.ts'
 
 const machines = [
   { id: 'm1', name: 'Drum', type: 'thermal_asset', ratedPowerKw: 250, isActive: true },
@@ -18,17 +18,6 @@ const dependencies = [
 ]
 const data = { machines, processes, dependencies, factory: { timezone: 'UTC' } } as never
 
-function entry(machineId: string, startsAt: string, endsAt: string, metadata: Record<string, unknown>) {
-  return { id: `${machineId}-${startsAt}`, machineId, processId: 'p', startsAt, endsAt, metadata }
-}
-const schedule = {
-  horizonStart: '2026-01-05T00:00:00Z', horizonEnd: '2026-01-06T00:00:00Z',
-  entries: [
-    entry('m1', '2026-01-05T12:00:00Z', '2026-01-05T13:00:00Z', { solar_kwh: 1, grid_kwh: 2 }),
-    entry('m1', '2026-01-05T09:00:00Z', '2026-01-05T11:00:00Z', { solar_kwh: 3, grid_kwh: 4 }),
-    entry('m2', '2026-01-05T14:00:00Z', '2026-01-05T15:00:00Z', {}),
-  ],
-} as never
 
 test('flow plan derives ordered zones from dependencies and keeps unassigned machines apart', () => {
   const plan = flowPlan(data)
@@ -39,30 +28,7 @@ test('flow plan derives ordered zones from dependencies and keeps unassigned mac
   assert.deepEqual(plan.unassignedMachineIds, ['m3'])
 })
 
-test('glyph kind maps stored machine types to the original tile glyphs', () => {
-  assert.equal(glyphKind('thermal_asset'), 'oven')
-  assert.equal(glyphKind('rotational_asset'), 'mixer')
-  assert.equal(glyphKind('conveyor'), 'conveyor')
-  assert.equal(glyphKind('generator'), 'generator')
-  assert.equal(glyphKind(null), 'generic')
-})
 
-test('machine plan sums planned solar/grid, picks the first slot and never invents values', () => {
-  const plan = machinePlan(data, schedule, 'm1')
-  assert.equal(plan.entryCount, 2)
-  assert.equal(plan.solarKwh, 4)
-  assert.equal(plan.gridKwh, 6)
-  assert.equal(plan.nextSlot, 'Mon 05 09:00–11:00')
-  assert.ok(Math.abs((plan.loadPct ?? 0) - 12.5) < 1e-9)
-  assert.deepEqual(plan.processNames, ['Roast', 'Grind'])
-  const missing = machinePlan(data, schedule, 'm2')
-  assert.equal(missing.solarKwh, null)
-  assert.equal(missing.gridKwh, null)
-  const none = machinePlan(data, undefined, 'm3')
-  assert.equal(none.entryCount, 0)
-  assert.equal(none.nextSlot, null)
-  assert.equal(none.loadPct, null)
-})
 
 test('Factory-3D link carries factoryId and scheduleId only', () => {
   const url = new URL(factory3dUrl('http://localhost:5174', 'f1', 's1'))
@@ -70,4 +36,25 @@ test('Factory-3D link carries factoryId and scheduleId only', () => {
   assert.equal(url.searchParams.get('factoryId'), 'f1')
   assert.equal(url.searchParams.get('scheduleId'), 's1')
   assert.equal([...url.searchParams.keys()].length, 2)
+})
+
+test('machine activity reports running, waiting, done and unused at an instant', () => {
+  const blocks = [
+    { label: 'Roast', start: 100, end: 200, moved: true, powerKw: 250 },
+    { label: 'Grind', start: 300, end: 400, moved: false, powerKw: 200 },
+  ]
+  assert.equal(machineActivity(blocks, 150).state, 'running')
+  assert.equal(machineActivity(blocks, 150).current?.label, 'Roast')
+  assert.equal(machineActivity(blocks, 150).next?.label, 'Grind')
+  assert.equal(machineActivity(blocks, 200).state, 'waiting')
+  assert.equal(machineActivity(blocks, 50).next?.label, 'Roast')
+  assert.equal(machineActivity(blocks, 400).state, 'done')
+  assert.equal(machineActivity([], 150).state, 'unused')
+})
+
+test('embed link keeps the factory and schedule and adds embed=1', () => {
+  const url = new URL(factory3dEmbedUrl('http://localhost:5174', 'f-1', 's-1'))
+  assert.equal(url.searchParams.get('factoryId'), 'f-1')
+  assert.equal(url.searchParams.get('scheduleId'), 's-1')
+  assert.equal(url.searchParams.get('embed'), '1')
 })

@@ -243,9 +243,7 @@ function Scenario({ scenario }: { scenario: ScenarioData }) {
       </Card>
 
       <Card title="The factory schedule SolarShift optimized" provenance={<ProvenanceTag provenance="planned" label="Optimizer output" />}>
-        <div className={styles.flowLine} aria-hidden="true">
-          <span>Baseline schedule</span><b>↓ SolarShift optimization</b><span>Optimized schedule</span>
-        </div>
+        <p className={styles.note}>Teal blocks = when each process runs after SolarShift. Dashed outlines = where it ran before.</p>
         {timeline.window && timeline.lanes.length ? (
           <ScheduleGantt
             lanes={timeline.lanes}
@@ -259,19 +257,19 @@ function Scenario({ scenario }: { scenario: ScenarioData }) {
         )}
       </Card>
 
-      {compare.length > 0 && (
-        <CompareCard title="Before vs after SolarShift" compare={compare} provenance={<ProvenanceTag provenance="modeled" />} />
-      )}
-      <p className={styles.note}>MODELED TARIFF ENERGY COST — NOT AN ELECTRICITY BILL. Costs are in ₹ (INR) as stored by the replay.</p>
-
-      <div className={styles.factory3dLinks}>
-        <a href={factory3dLink('baseline')} target="_blank" rel="noreferrer">Open baseline schedule in Factory-3D</a>
-        <a href={factory3dLink('optimized')} target="_blank" rel="noreferrer">Open SolarShift optimized schedule in Factory-3D</a>
-      </div>
-
       <details className={styles.details}>
-        <summary>Data sources, tariff windows, schedules and assumptions</summary>
+        <summary>More detail: before/after numbers, data sources, tariffs and assumptions</summary>
         <div className={styles.detailsBody}>
+      {compare.length > 0 && (
+            <CompareCard title="Before vs after SolarShift" compare={compare} provenance={<ProvenanceTag provenance="modeled" />} />
+          )}
+          <p className={styles.note}>MODELED TARIFF ENERGY COST — NOT AN ELECTRICITY BILL. Costs are in ₹ (INR) as stored by the replay.</p>
+
+          <div className={styles.factory3dLinks}>
+            <a href={factory3dLink('baseline')} target="_blank" rel="noreferrer">Open baseline schedule in Factory-3D</a>
+            <a href={factory3dLink('optimized')} target="_blank" rel="noreferrer">Open SolarShift optimized schedule in Factory-3D</a>
+          </div>
+
           <div className={styles.banner}>
             <ProvenanceTag provenance="recorded" label="REAL EXTERNAL SOURCE — NASA POWER" />
             <span>{text(manifest.source)} · {text(manifest.parameter)} · {text(manifest.units)}</span>
@@ -443,22 +441,15 @@ export default function HistoricalReplay({ selectedFactoryName }: HistoricalRepl
   return (
     <div className={styles.page}>
       <section className={styles.hero} aria-label="Historical SolarShift">
-        <span className={styles.heroEyebrow}>Historical SolarShift</span>
-        <h2>How the optimizer performs on real historical solar and tariff conditions</h2>
+        <span className={styles.heroEyebrow}>Historical SolarShift · historical / modelled scenario — not live telemetry</span>
+        <h2>Does SolarShift work with real sunshine and real tariffs?</h2>
         <p>
-          We replayed historical sunlight and Andhra Pradesh tariff windows and optimized a factory schedule around them.
+          We took one real week of NASA sunlight data and the Andhra Pradesh electricity tariff, and let the optimizer schedule a model factory around them.
           {current ? ` Scenario factory: ${text(current.factory.name)} — a synthetic chocolate manufacturing model · ${scenarioDateRange(current.manifest)}.` : ''}
         </p>
         {selectedFactoryName && (
           <p className={styles.heroNote}>This replay uses its own scenario model and solver. It does not represent {selectedFactoryName}.</p>
         )}
-        <ol className={styles.story}>
-          <li><span className={styles.storyTag}>Real input</span><strong>Historical solar data</strong><small>NASA POWER hourly sunlight</small></li>
-          <li><span className={styles.storyTag}>Scenario</span><strong>Factory demand</strong><small>{current ? `${current.processes.length} processes on ${current.machines.length} machines` : 'scenario factory model'}</small></li>
-          <li><span className={styles.storyTag}>Optimizer</span><strong>Optimization</strong><small>CP-SAT, APERC time-of-day tariff</small></li>
-          <li><span className={styles.storyTag}>Output</span><strong>Optimized schedule</strong><small>same processes, new timing</small></li>
-          <li><span className={styles.storyTag}>Modeled</span><strong>Solar ↑ · Grid ↓ · Cost ↓</strong><small>constraints kept</small></li>
-        </ol>
       </section>
 
       {loading && <p role="status" className={styles.notice}>Loading historical scenario data…</p>}
@@ -479,10 +470,15 @@ export default function HistoricalReplay({ selectedFactoryName }: HistoricalRepl
             <StatusChip status={result?.status === 'succeeded' ? 'Saved' : 'Idle'}>{text(result?.status, 'result unavailable')}</StatusChip>
           </div>
           <Scenario key={text(current.factory.id)} scenario={current} />
-          {scenarios.length > 1 && <Overview scenarios={scenarios} />}
-          <div className={styles.labels} aria-label="Data classification labels">
-            {REQUIRED_LABELS.map((label) => <span key={label}>{label}</span>)}
-          </div>
+          <details className={styles.details}>
+            <summary>Compare both weeks and data labels</summary>
+            <div className={styles.detailsBody}>
+              {scenarios.length > 1 && <Overview scenarios={scenarios} />}
+              <div className={styles.labels} aria-label="Data classification labels">
+                {REQUIRED_LABELS.map((label) => <span key={label}>{label}</span>)}
+              </div>
+            </div>
+          </details>
         </>
       )}
     </div>

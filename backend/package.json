@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:db": "node scripts/verify-supabase.mjs",
+    "optimizer:check": "node scripts/check-optimizer.mjs",
     "import:solarshift-historical": "node --env-file=.env.local scripts/import-solarshift-historical.mjs",
     "offline:seed": "vite-node --config vitest.config.ts scripts/seed-offline.ts",
     "offline:token": "vite-node --config vitest.config.ts scripts/mint-offline-token.ts"

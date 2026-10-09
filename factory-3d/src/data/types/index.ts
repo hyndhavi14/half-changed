@@ -45,6 +45,8 @@ export interface ScheduleEntryData {
   starts_at: string;
   ends_at: string;
   sequence: number;
+  /** Planned power for this run, when the schedule stores it. */
+  power_kw?: number | null;
 }
 
 export interface ScheduleSnapshot {

@@ -1,7 +1,55 @@
-.optimizationError {
-  margin: 0 0 12px;
-  color: var(--terra-ink);
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 14px;
 }
+
+.twoColumnGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.caption {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-caption);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.recommendation {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sectionTitle {
+  color: var(--espresso);
+  font-size: var(--fs-card-title);
+}
+
+.noRecommendation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-card);
+  background: var(--milk);
+  color: var(--text-2);
+}
+
+.noRecommendation strong { color: var(--espresso); }
 
 .summary {
   display: flex;
@@ -91,94 +139,29 @@
   font-variant-numeric: tabular-nums;
 }
 
-.kpiGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
-  gap: 14px;
-}
 
-.twoColumnGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
-  gap: 16px;
-  align-items: start;
-}
-
-.caption {
-  margin: 0;
-  color: var(--text-2);
-  font-size: var(--fs-caption);
-}
-
-.link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  font-weight: 700;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.recommendation {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.sectionTitle {
-  color: var(--espresso);
-  font-size: var(--fs-card-title);
-}
-
-.noRecommendation {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 22px;
-  border: 1.5px dashed var(--line-strong);
-  border-radius: var(--radius-card);
-  background: var(--milk);
-  color: var(--text-2);
-}
-
-.noRecommendation strong { color: var(--espresso); }
-
-.utilization {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.utilRow {
-  display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) 72px;
-  align-items: center;
-  gap: 4px 12px;
-  font-size: 14px;
-}
-
-.utilRow strong {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.utilRow small {
-  grid-column: 2 / 4;
-  color: var(--text-2);
+.summaryLabel {
+  color: var(--sun-soft);
   font-size: 13px;
 }
 
-.emptySchedule {
+.factList {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.factList li {
+  display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 18px;
-  border: 1.5px dashed var(--line-strong);
+  padding: 10px 12px;
   border-radius: var(--radius-tile);
+  background: var(--cream);
   color: var(--text-2);
 }
 
-.emptySchedule p { margin: 0; }
+.factList strong { color: var(--espresso); text-align: right; }

@@ -318,7 +318,7 @@ describe('seed transaction handling', () => {
   it('labels synthetic energy accurately and stores quarter-hour solar energy', () => {
     expect(seedSql).toContain("then round((280 * greatest(0.0, sin(pi() * (extract(hour from t.ts at time zone 'Europe/Amsterdam') - 8) / 9.0)))::numeric * 5) / 20")
     expect(seedSql).toMatch(/'simulated',\s*'\{"demo": true, "note": "synthetic demonstration series"\}'::jsonb/)
-    expect(seedSql).toMatch(/on conflict do update set\s+generation_kwh = excluded\.generation_kwh,\s+source = excluded\.source;/)
+    expect(seedSql).toMatch(/on conflict \(factory_id, coalesce\(machine_id, '00000000-0000-0000-0000-000000000000'::uuid\), recorded_at\) do update set\s+generation_kwh = excluded\.generation_kwh,\s+source = excluded\.source;/)
     expect(seedSql).not.toMatch(/on conflict do update set[\s\S]{0,100}consumption_kwh/)
   })
 

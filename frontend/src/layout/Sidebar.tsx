@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import Logo from '../components/Logo/Logo'
-import Factory3DLauncher from '../components/Factory3DLauncher/Factory3DLauncher'
 import { useFactory } from '../context/useFactory'
 import { latestOptimization } from '../data/optimizationView'
 import { supabase } from '../data/supabase'
@@ -18,7 +17,7 @@ const NAV_ITEMS = [
 ]
 
 export default function Sidebar() {
-  const { factories, selectedFactoryId, setFactoryId, backendData, optimizing } = useFactory()
+  const { factories, selectedFactoryId, setFactoryId, backendData, optimizing, optimizationRun } = useFactory()
   const isHistoricalReplay = useLocation().pathname === '/solarshift-historical'
   const [menuOpen, setMenuOpen] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
@@ -30,6 +29,7 @@ export default function Sidebar() {
     timeZone: backendData?.factory.timezone ?? null,
     optimizing,
     hasData: backendData !== null,
+    sessionFailed: optimizationRun?.status === 'failed',
   })
 
   useEffect(() => {
@@ -162,12 +162,6 @@ export default function Sidebar() {
           <p role="alert" className={styles.accountError}>{accountError}</p>
         )}
 
-        {!isHistoricalReplay && (
-          <details className={styles.launcherDetails}>
-            <summary className={styles.launcherSummary}>Open a schedule in Factory-3D</summary>
-            <Factory3DLauncher />
-          </details>
-        )}
       </div>
     </nav>
   )

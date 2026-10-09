@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import SegmentedToggle from '../SegmentedToggle/SegmentedToggle'
+import { placeLabel, type Placement } from './ganttLabels.ts'
 import styles from './ScheduleGantt.module.css'
 
 export interface GanttBlockInput {
   id: string
+  processId?: string
   label: string
   start: number
   end: number
@@ -40,6 +42,9 @@ interface ScheduleGanttProps {
   compact?: boolean
   /** Starting zoom; '2' keeps one-hour blocks wide enough for their names. */
   initialZoom?: '1' | '2' | '4'
+  /** When set, optimized blocks become buttons that select their process. */
+  onSelect?: (processId: string) => void
+  selectedId?: string
 }
 
 const HOUR_MS = 3_600_000
@@ -73,7 +78,7 @@ function range(block: GanttBlockInput, timeZone: string): string {
   return `${clock.format(new Date(block.start))}–${clock.format(new Date(block.end)).replace(/^\w+ /, '')}`
 }
 
-export default function ScheduleGantt({ lanes, window, timeZone, mode, bands, marker, ariaLabel, compact = false, initialZoom }: ScheduleGanttProps) {
+export default function ScheduleGantt({ lanes, window, timeZone, mode, bands, marker, ariaLabel, compact = false, initialZoom, onSelect, selectedId }: ScheduleGanttProps) {
   const hours = (window.end - window.start) / HOUR_MS
   const [zoom, setZoom] = useState<string>(initialZoom ?? (hours > 12 ? '2' : '1'))
   const zoomFactor = Number(zoom)
@@ -81,6 +86,27 @@ export default function ScheduleGantt({ lanes, window, timeZone, mode, bands, ma
   const trackMin = (compact ? 560 : 720) * zoomFactor
   const showBaseline = mode !== 'optimized'
   const showOptimized = mode !== 'baseline'
+  const axisRef = useRef<HTMLDivElement>(null)
+  const [trackPx, setTrackPx] = useState(0)
+  useEffect(() => {
+    const element = axisRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => setTrackPx(element.clientWidth))
+    observer.observe(element)
+    setTrackPx(element.clientWidth)
+    return () => observer.disconnect()
+  }, [])
+  const pxPerMs = trackPx > 0 ? trackPx / (window.end - window.start) : 0
+  const outside = (block: GanttBlockInput, placement: Placement, kind: string) => placement === 'inside' ? null : (
+    <span
+      key={`${kind}-label-${block.id}`}
+      className={styles.outsideLabel}
+      aria-hidden="true"
+      style={placement === 'right' ? { left: `calc(${pct(block.end, window)}% + 4px)` } : { right: `calc(${100 - pct(block.start, window)}% + 4px)` }}
+    >
+      {block.label}
+    </span>
+  )
 
   return (
     <div className={styles.wrapper}>
@@ -96,7 +122,7 @@ export default function ScheduleGantt({ lanes, window, timeZone, mode, bands, ma
       <div className={styles.scroller} tabIndex={0} role="region" aria-label={`${ariaLabel}, scrollable`}>
         <div className={`${styles.grid} ${compact ? styles.compact : ''}`} style={{ minWidth: `calc(var(--gantt-label) + ${trackMin}px)` }}>
           <div className={styles.corner} />
-          <div className={styles.axis}>
+          <div className={styles.axis} ref={axisRef}>
             {bands && bands.length > 0 && (
               <div className={styles.bandStrip} aria-hidden="true">
                 {bands.map((band) => (
@@ -127,26 +153,39 @@ export default function ScheduleGantt({ lanes, window, timeZone, mode, bands, ma
                 )}
                 {showBaseline && lane.baseline
                   .filter((block) => mode === 'baseline' || block.moved)
-                  .map((block) => (
-                    <span
-                      key={`b-${block.id}`}
-                      className={mode === 'baseline' ? `${styles.block} ${block.moved ? styles.willMove : styles.kept}` : styles.ghost}
-                      style={{ left: `${pct(block.start, window)}%`, width: `${pct(block.end, window) - pct(block.start, window)}%` }}
-                      title={`${block.label} · baseline ${range(block, timeZone)}${block.powerKw !== null ? ` · ${block.powerKw} kW` : ''}`}
-                    >
-                      {mode === 'baseline' && <span className={styles.blockLabel}>{block.label}</span>}
-                    </span>
-                  ))}
-                {showOptimized && lane.optimized.map((block) => (
-                  <span
-                    key={`o-${block.id}`}
-                    className={`${styles.block} ${block.moved ? styles.moved : styles.kept}`}
-                    style={{ left: `${pct(block.start, window)}%`, width: `${pct(block.end, window) - pct(block.start, window)}%` }}
-                    title={`${block.label} · optimized ${range(block, timeZone)}${block.powerKw !== null ? ` · ${block.powerKw} kW` : ''}${block.moved ? ' · moved' : ''}`}
-                  >
-                    <span className={styles.blockLabel}>{block.label}</span>
-                  </span>
-                ))}
+                  .map((block) => {
+                    const placement = mode === 'baseline' ? placeLabel(block, lane.baseline.filter((other) => other !== block), pxPerMs) : 'inside'
+                    return [
+                      <span
+                        key={`b-${block.id}`}
+                        className={mode === 'baseline' ? `${styles.block} ${block.moved ? styles.willMove : styles.kept}` : styles.ghost}
+                        style={{ left: `${pct(block.start, window)}%`, width: `${pct(block.end, window) - pct(block.start, window)}%` }}
+                        title={`${block.label} · baseline ${range(block, timeZone)}${block.powerKw !== null ? ` · ${block.powerKw} kW` : ''}`}
+                      >
+                        {mode === 'baseline' && placement === 'inside' && <span className={styles.blockLabel}>{block.label}</span>}
+                      </span>,
+                      outside(block, placement, 'b'),
+                    ]
+                  })}
+                {showOptimized && lane.optimized.map((block) => {
+                  const placement = placeLabel(block, lane.optimized.filter((other) => other !== block), pxPerMs)
+                  const label = placement === 'inside' ? <span className={styles.blockLabel}>{block.label}</span> : null
+                  const className = `${styles.block} ${block.moved ? styles.moved : styles.kept}${block.processId && block.processId === selectedId ? ` ${styles.selectedBlock}` : ''}`
+                  const style = { left: `${pct(block.start, window)}%`, width: `${pct(block.end, window) - pct(block.start, window)}%` }
+                  const title = `${block.label} · optimized ${range(block, timeZone)}${block.powerKw !== null ? ` · ${block.powerKw} kW` : ''}${block.moved ? ' · moved' : ''}`
+                  return [
+                    onSelect && block.processId ? (
+                      <button key={`o-${block.id}`} type="button" className={className} style={style} title={title} aria-label={title} aria-pressed={block.processId === selectedId} onClick={() => onSelect(block.processId as string)}>
+                        {label}
+                      </button>
+                    ) : (
+                      <span key={`o-${block.id}`} className={className} style={style} title={title}>
+                        {label}
+                      </span>
+                    ),
+                    outside(block, placement, 'o'),
+                  ]
+                })}
               </div>
             </div>
           ))}

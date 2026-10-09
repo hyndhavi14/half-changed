@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import styles from './SolarDemandChart.module.css'
 
 export interface SolarDemandPoint {
@@ -6,6 +7,7 @@ export interface SolarDemandPoint {
   baselineKw: number
   optimizedKw: number
   band: 'peak' | 'mid' | 'off' | null
+  price?: number | null
 }
 
 interface SolarDemandChartProps {
@@ -19,6 +21,8 @@ interface SolarDemandChartProps {
   solarLabel: string
   /** Minimum px per hour column; long horizons scroll instead of shrinking. */
   minColumn?: number
+  /** Shown in the hover readout next to the price. */
+  currency?: string
 }
 
 const BAND_LABEL = { peak: 'peak tariff', mid: 'mid tariff', off: 'off-peak tariff' } as const
@@ -32,8 +36,9 @@ function niceMax(value: number): number {
 }
 
 export default function SolarDemandChart({
-  points, view, timeZone, ariaLabel, selectedIndex, onSelect, solarLabel, minColumn = 14,
+  points, view, timeZone, ariaLabel, selectedIndex, onSelect, solarLabel, minColumn = 14, currency,
 }: SolarDemandChartProps) {
+  const [hover, setHover] = useState<number | null>(null)
   const top = niceMax(Math.max(0, ...points.map((point) => Math.max(point.solarKw ?? 0, point.baselineKw, point.optimizedKw))) * 1.05)
   const clock = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' })
   const day = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short' })
@@ -43,8 +48,20 @@ export default function SolarDemandChart({
   const hasBands = points.some((point) => point.band !== null)
   const fmt = (value: number) => value.toLocaleString('en-IN', { maximumFractionDigits: 1 })
 
+  const shown = hover ?? selectedIndex ?? null
+  const active = shown !== null ? points[shown] : undefined
+  const readout = (() => {
+    if (!active) return 'Hover or select an hour to see exact values.'
+    const demand = view === 'baseline' ? active.baselineKw : active.optimizedKw
+    const solar = active.solarKw
+    const grid = Math.max(0, demand - (solar ?? 0))
+    const when = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(active.start))
+    return `${when} · Solar ${solar === null ? 'not recorded' : `${fmt(solar)} kW`} · Demand ${fmt(demand)} kW · Grid import ${fmt(grid)} kW${active.price != null ? ` · ${active.price.toLocaleString('en-GB', { maximumFractionDigits: 4 })} ${currency ?? ''}/kWh` : ''}`
+  })()
+
   return (
     <figure className={styles.figure} aria-label={ariaLabel}>
+      <p className={styles.readout} aria-live="polite">{readout}</p>
       <div className={styles.body}>
         <div className={styles.yAxis} aria-hidden="true">
           <span>{fmt(top)} kW</span>
@@ -53,7 +70,7 @@ export default function SolarDemandChart({
         </div>
         <div className={styles.scroller} tabIndex={0} role="region" aria-label={`${ariaLabel}, scrollable`}>
           <div className={styles.plot} style={{ minWidth: `${points.length * minColumn}px` }}>
-            <div className={styles.columns}>
+            <div className={styles.columns} onMouseLeave={() => setHover(null)}>
               {points.map((point, index) => {
                 const demand = view === 'baseline' ? point.baselineKw : point.optimizedKw
                 const solar = point.solarKw ?? 0
@@ -71,11 +88,11 @@ export default function SolarDemandChart({
                 )
                 const className = `${styles.column}${surplus ? ` ${styles.surplus}` : ''}${index === selectedIndex ? ` ${styles.selected}` : ''}`
                 return onSelect ? (
-                  <button key={point.start} type="button" className={className} aria-label={description} aria-pressed={index === selectedIndex} onClick={() => onSelect(index)}>
+                  <button key={point.start} type="button" className={className} aria-label={description} aria-pressed={index === selectedIndex} onClick={() => onSelect(index)} onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)}>
                     {inner}
                   </button>
                 ) : (
-                  <span key={point.start} className={className} title={description}>{inner}</span>
+                  <span key={point.start} className={className} title={description} onMouseEnter={() => setHover(index)}>{inner}</span>
                 )
               })}
             </div>
@@ -99,7 +116,7 @@ export default function SolarDemandChart({
       <figcaption className={styles.legend}>
         <span><i className={styles.keySolar} />{solarLabel}</span>
         <span><i className={styles.keyFromSolar} />Demand met by solar</span>
-        <span><i className={styles.keyFromGrid} />Demand from grid</span>
+        <span><i className={styles.keyFromGrid} />Grid import (demand not covered by solar)</span>
         {hasBands && <span><i className={styles.keyPeak} />Peak</span>}
         {hasBands && <span><i className={styles.keyMid} />Mid</span>}
         {hasBands && <span><i className={styles.keyOff} />Off-peak tariff</span>}

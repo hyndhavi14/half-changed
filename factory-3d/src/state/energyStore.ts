@@ -10,7 +10,8 @@ interface EnergyState {
 export const useEnergyStore = create<EnergyState>()((set) => ({
   solarKw: 95,
   setSolar: (kw) => set({
-    solarKw: kw === null ? null : Math.max(0, Math.min(120, Math.round(kw))),
+    // No upper cap: a stored solar profile can exceed the 120 kW demo-slider range.
+    solarKw: kw === null ? null : Math.max(0, Math.round(kw)),
   }),
 }));
 

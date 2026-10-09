@@ -282,6 +282,11 @@
 }
 
 /* Long multi-day windows wrap so every column fits at desktop width. */
+.shiftTable .machineCell {
+  min-width: 150px;
+  white-space: normal;
+}
+
 .shiftTable .was,
 .shiftTable .now {
   min-width: 120px;
@@ -324,4 +329,48 @@
 
 .runDetails p {
   margin: 8px 0 0;
+}
+
+.detailPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.detailPanel > article { align-self: stretch; }
+
+.selectedRow > * { background: var(--teal-soft); }
+
+.rowButton {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link-dark);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.reasonText {
+  display: block;
+  margin-top: 4px;
+  max-width: 170px;
+  color: var(--teal-ink);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: normal;
+}
+
+.afterText {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+  max-width: 220px;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: normal;
 }

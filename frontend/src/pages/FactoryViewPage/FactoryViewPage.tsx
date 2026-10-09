@@ -1,319 +1,266 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import Button from '../../components/Button/Button'
 import Card from '../../components/Card/Card'
+import OptimizationStatus from '../../components/OptimizationStatus/OptimizationStatus'
 import PageHeader from '../../components/PageHeader/PageHeader'
-import ProgressBar from '../../components/ProgressBar/ProgressBar'
 import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
 import SegmentedToggle from '../../components/SegmentedToggle/SegmentedToggle'
 import StatTile from '../../components/StatTile/StatTile'
-import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
 import type { BackendFactoryData } from '../../data/backendApi'
-import { displayValue, findStoredSchedule } from '../../data/backendView'
-import { NOT_AVAILABLE } from '../DashboardPage/dashboardView'
-import { formatEnergy, formatNumber, plannedTotals } from '../EnergyPage/energyPageView'
-import { factory3dUrl, flowPlan, glyphKind, machinePlan, type GlyphKind } from './factoryViewModel'
+import { moveReasons } from '../../data/factoryInsight'
+import { solarShiftScope } from '../../data/solarShiftScope'
+import { formatCurrency, formatDuration, formatKw, formatKwh } from '../../data/format'
+import { useFactoryInsight } from '../../data/useFactoryInsight'
+import { useOptimizationState } from '../../data/useOptimizationState'
+import { sourceTag } from '../sourceProvenance'
+import { energySourceLabel } from '../DashboardPage/dashboardView'
+import Factory3DEmbed from './Factory3DEmbed'
+import { flowPlan, machineActivity } from './factoryViewModel'
 import styles from './FactoryViewPage.module.css'
-
-type ViewType = '2d' | '3d'
-type Machine = BackendFactoryData['machines'][number]
 
 const FACTORY_3D_URL = import.meta.env.VITE_FACTORY_3D_URL ?? 'http://localhost:5174'
 
-function MachineGlyph({ kind }: { kind: GlyphKind }) {
-  return (
-    <svg className={styles.machineGlyph} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      {kind === 'conveyor' ? (
-        <>
-          <path d="M4 20h24M7 24h18M9 10h14v8H9z" />
-          <circle cx="9" cy="23" r="2" />
-          <circle cx="23" cy="23" r="2" />
-        </>
-      ) : kind === 'oven' ? (
-        <>
-          <path d="M7 5h18v22H7zM11 10h10v8H11zM11 22h2M17 22h4" />
-          <path d="M14 15c-2-2 2-3 0-5M18 15c-2-2 2-3 0-5" />
-        </>
-      ) : kind === 'tank' || kind === 'mixer' ? (
-        <>
-          <path d="M8 8h16v16H8zM6 8h20M11 24v3m10-3v3M16 3v10m-4-3 4 3 4-3" />
-          {kind === 'mixer' && <path d="M12 18h8" />}
-        </>
-      ) : kind === 'generator' ? (
-        <>
-          <path d="M5 22h22L23 12H9zM9 17h14M16 12v10" />
-          <path d="M16 4v3M9 6l2 2M23 6l-2 2" />
-        </>
-      ) : (
-        <>
-          <path d="M6 8h20v16H6zM10 12h12M10 16h12M10 20h8" />
-          <circle cx="24" cy="24" r="3" />
-        </>
-      )}
-    </svg>
-  )
+/**
+ * Machine slugs the separate Factory-3D app can place in its scene.
+ * Mirrors MACHINE_LAYOUT in factory-3d/src/data/providers/ApiMachineDataProvider.ts.
+ */
+const FACTORY_3D_SLUGS = new Set(['roasting-drum', 'refining-conche', 'tempering-unit', 'moulding-line', 'cooling-tunnel', 'packing-cell'])
+
+
+const HOUR = 3_600_000
+
+function clock(at: number, timeZone: string, withDay = true): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone, ...(withDay ? { weekday: 'short' as const } : {}), hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(at))
 }
 
-function MachineTile({
-  machine,
-  selected,
-  plannedSolar,
-  onSelect,
-}: {
-  machine: Machine
-  selected: boolean
-  plannedSolar: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      className={`${styles.machineTile} ${machine.isActive ? styles.running : styles.idle}${selected ? ` ${styles.selectedMachine}` : ''}`}
-      aria-pressed={selected}
-      onClick={onSelect}
-    >
-      <span className={styles.machineTileTop}>
-        <MachineGlyph kind={glyphKind(machine.type)} />
-        <span className={styles.machineStatusDot} aria-hidden="true" />
-      </span>
-      <span className={styles.machineName}>{machine.name}</span>
-      <span className={styles.machinePower}>{displayValue(machine.ratedPowerKw, ' kW')}</span>
-      <span className={styles.machineStatusText}>{machine.isActive ? 'Active' : 'Inactive'}</span>
-      {plannedSolar && (
-        <span className={styles.solarMark} aria-label="Planned solar use">
-          {'☀'}
-        </span>
-      )}
-    </button>
-  )
-}
-
-export function FactoryFloorPlan({
-  data,
-  selectedMachineId,
-  onSelectMachine,
-}: {
-  data: BackendFactoryData
-  selectedMachineId: string
-  onSelectMachine: (machineId: string) => void
-}) {
-  const optimized = findStoredSchedule(data, 'optimized')
-  const totals = plannedTotals(optimized)
-  const plan = flowPlan(data)
-  const machineById = new Map(data.machines.map((machine) => [machine.id, machine]))
-  const zoneOf = new Map<string, string>()
-  for (const zone of plan.zones) for (const id of zone.machineIds) zoneOf.set(id, zone.title)
-  const zones = [
-    ...plan.zones,
-    ...(plan.unassignedMachineIds.length
-      ? [{ number: plan.zones.length + 1, title: 'No assigned process', machineIds: plan.unassignedMachineIds }]
-      : []),
-  ]
-  const selected = machineById.get(selectedMachineId) ?? data.machines[0]
-  const selectedPlan = selected ? machinePlan(data, optimized, selected.id) : null
-  const solarPct = totals.solarKwh !== null && totals.totalKwh ? (totals.solarKwh / totals.totalKwh) * 100 : null
-  const gridPct = totals.gridKwh !== null && totals.totalKwh ? (totals.gridKwh / totals.totalKwh) * 100 : null
-  const plannedSolarFor = (id: string) => {
-    const machine = machinePlan(data, optimized, id)
-    return machine.solarKwh !== null && machine.solarKwh > 0
-  }
-
-  return (
-    <>
-      <div className={styles.energySummary}>
-        <div className={styles.solarEnergy}>
-          <div className={styles.energyHeading}>
-            <span>Planned solar (modeled)</span>
-            <strong>{formatEnergy(totals.solarKwh)}</strong>
-          </div>
-          <ProgressBar value={solarPct ?? 0} color="var(--sun)" ariaLabel="Planned solar share of the optimized schedule" />
-        </div>
-        <div className={styles.gridEnergy}>
-          <div className={styles.energyHeading}>
-            <span>Planned grid supply (modeled)</span>
-            <strong>{formatEnergy(totals.gridKwh)}</strong>
-          </div>
-          <ProgressBar value={gridPct ?? 0} color="var(--grid-brown)" ariaLabel="Planned grid share of the optimized schedule" />
-        </div>
-      </div>
-
-      <div className={styles.floorLayout}>
-        <Card title="Floor plan · production flow">
-          <div
-            className={styles.floorScroller}
-            tabIndex={0}
-            aria-label={`${data.factory.name} production flow, horizontally scrollable`}
-          >
-            <div className={styles.floorFlow}>
-              {zones.map((zone, index) => (
-                <div className={styles.stageGroup} key={`${zone.number}-${zone.title}`}>
-                  <section className={styles.stageZone} aria-label={`Stage ${zone.number}: ${zone.title}`}>
-                    <div className={styles.zoneHeader}>
-                      <span className={styles.zoneNumber}>{zone.number}</span>
-                      <h3>{zone.title}</h3>
-                    </div>
-                    <div className={styles.zoneMachines}>
-                      {zone.machineIds.map((id) => {
-                        const machine = machineById.get(id)
-                        return machine ? (
-                          <MachineTile
-                            key={id}
-                            machine={machine}
-                            selected={id === selected?.id}
-                            plannedSolar={plannedSolarFor(id)}
-                            onSelect={() => onSelectMachine(id)}
-                          />
-                        ) : null
-                      })}
-                    </div>
-                  </section>
-                  {index < zones.length - 1 && <span className={styles.stageArrow} aria-hidden="true">{'→'}</span>}
-                </div>
-              ))}
-              {zones.length === 0 && <p className={styles.emptyStage}>No machines are stored for this factory.</p>}
-            </div>
-          </div>
-          <div className={styles.legend} aria-label="Floor plan legend">
-            <span className={styles.legendItem}><span className={`${styles.legendDot} ${styles.running}`} />Active</span>
-            <span className={styles.legendItem}><span className={`${styles.legendDot} ${styles.idle}`} />Inactive</span>
-            <span className={styles.legendItem}><span className={`${styles.legendDot} ${styles.solarLegend}`} />Planned solar use</span>
-          </div>
-          <p className={styles.flowNote}>
-            Stages follow the stored process dependencies{plan.cyclic ? ' (they contain a cycle, so one stage is shown)' : ''}. Machine positions are not stored, so this is a flow view, not a physical layout.
-          </p>
-        </Card>
-
-        <Card title="Machine details" className={styles.detailsCard}>
-          {selected && selectedPlan ? (
-            <>
-              <p className={styles.selectedMachineName}>{selected.name}</p>
-              <div className={styles.machineStatusRow}>
-                <StatusChip status={selected.isActive ? 'Active' : 'Inactive'} />
-                {selectedPlan.solarKwh !== null && selectedPlan.solarKwh > 0 && <StatusChip status="Solar">Planned solar</StatusChip>}
-              </div>
-              <dl className={styles.machineFacts}>
-                <div><dt>Stage</dt><dd>{zoneOf.get(selected.id) ?? 'No assigned process'}</dd></div>
-                <div><dt>Rated power</dt><dd>{displayValue(selected.ratedPowerKw, ' kW')}</dd></div>
-                <div>
-                  <dt>Planned energy</dt>
-                  <dd>
-                    {selectedPlan.solarKwh === null || selectedPlan.gridKwh === null
-                      ? NOT_AVAILABLE
-                      : `Solar ${formatNumber(selectedPlan.solarKwh)} · Grid ${formatNumber(selectedPlan.gridKwh)} kWh`}
-                  </dd>
-                </div>
-                <div><dt>Next slot</dt><dd>{selectedPlan.nextSlot ?? 'No scheduled slot'}</dd></div>
-              </dl>
-              <div className={styles.utilization}>
-                <div className={styles.utilizationHeading}>
-                  <span>Planned load (optimized horizon)</span>
-                  <strong>{selectedPlan.loadPct === null ? NOT_AVAILABLE : `${Math.round(selectedPlan.loadPct)}%`}</strong>
-                </div>
-                <ProgressBar value={selectedPlan.loadPct ?? 0} ariaLabel={`${selected.name} planned load`} />
-              </div>
-              <p className={styles.flowNote}>
-                Processes: {selectedPlan.processNames.length ? selectedPlan.processNames.join(', ') : 'none assigned'}.
-              </p>
-              <Link className={styles.scheduleLink} to="/schedule">
-                See in schedule <span aria-hidden="true">{'→'}</span>
-              </Link>
-            </>
-          ) : (
-            <p className={styles.emptySelection}>No machines are available to display. Add machines in Factory Builder.</p>
-          )}
-        </Card>
-      </div>
-    </>
-  )
+function metadataNumber(metadata: unknown, key: string): number | null {
+  if (typeof metadata !== 'object' || metadata === null) return null
+  const value = (metadata as Record<string, unknown>)[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export default function FactoryViewPage() {
   const { backendData, loading, error } = useFactory()
-  const [view, setView] = useState<ViewType>('3d')
-  const [selectedMachineId, setSelectedMachineId] = useState('')
   if (!backendData) {
-    return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
+    return <PageHeader eyebrow={loading ? 'Loading factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
+  }
+  return <FactoryScene key={backendData.factory.id} data={backendData} />
+}
+
+function FactoryScene({ data }: { data: BackendFactoryData }) {
+  const insight = useFactoryInsight(data)
+  const { pair, outcome, series, timeZone, currency } = insight
+  const { state, optimizing, run } = useOptimizationState(data, pair)
+  const [view, setView] = useState<'baseline' | 'optimized'>('optimized')
+  // SolarShift demo: start at the sunniest hour. Other factories: start at the first hour with work.
+  const peakSolarIndex = series.reduce((best, point, index) => ((point.solarKw ?? -1) > (series[best]?.solarKw ?? -1) ? index : best), 0)
+  const firstWork = Math.max(0, series.findIndex((point) => point.optimizedKw > 0))
+  const [hourIndex, setHourIndex] = useState(solarShiftScope(data.factory).enabled ? peakSolarIndex : firstWork)
+  const [playing, setPlaying] = useState(false)
+  const [selectedMachine, setSelectedMachine] = useState('')
+  const lastIndex = Math.max(0, series.length - 1)
+  const index = Math.min(hourIndex, lastIndex)
+  const point = series[index]
+  const at = point ? point.start + 30 * 60_000 : null
+  const labels = new Map(insight.labels.map((label) => [label.id, label]))
+  const lanes = new Map(insight.lanes.map((lane) => [lane.id, lane]))
+  const plan = flowPlan(data)
+  const scope = solarShiftScope(data.factory)
+  const viewOptions = [{ value: 'baseline', label: scope.before }, { value: 'optimized', label: scope.after }]
+  const movedLabel = `Moved by ${scope.mover === 'SolarShift' ? 'SolarShift' : 'the optimizer'}`
+  const solarTag = sourceTag(energySourceLabel(data.energy))
+  const modeled = <ProvenanceTag provenance="modeled" label="Modeled" />
+  const results = state.showResults
+  const demand = point ? (view === 'baseline' ? point.baselineKw : point.optimizedKw) : null
+  const solarKw = point?.solarKw ?? null
+  const gridKw = demand !== null ? Math.max(0, demand - (solarKw ?? 0)) : null
+  const scale = Math.max(demand ?? 0, solarKw ?? 0, 1)
+  const placed = data.machines.filter((machine) => FACTORY_3D_SLUGS.has(machine.slug)).length
+  const shownSchedule = view === 'baseline' ? pair.baseline : pair.optimized
+  const entriesByProcess = (schedule: typeof pair.optimized) => new Map((schedule?.entries ?? []).map((entry) => [entry.processId, entry]))
+  const baselineEntries = entriesByProcess(pair.baseline)
+  const optimizedEntries = entriesByProcess(pair.optimized)
+  const selected = selectedMachine ? labels.get(selectedMachine) : undefined
+  const selectedMoves = insight.moves.filter((move) => move.machineId === selectedMachine)
+
+  // Play steps through the plan one hour at a time and stops at the end.
+  useEffect(() => {
+    if (!playing) return
+    const timer = window.setInterval(() => {
+      setHourIndex((current) => {
+        if (current >= lastIndex) {
+          setPlaying(false)
+          return current
+        }
+        return current + 1
+      })
+    }, 700)
+    return () => window.clearInterval(timer)
+  }, [playing, lastIndex])
+
+  const syncFrom3d = (time: number) => {
+    const found = series.findIndex((candidate) => time >= candidate.start && time < candidate.start + HOUR)
+    if (found >= 0) setHourIndex(found)
   }
 
-  const data = backendData
-  const optimized = findStoredSchedule(data, 'optimized')
-  const baseline = findStoredSchedule(data, 'baseline')
-  const plan = flowPlan(data)
-  const totals = plannedTotals(optimized)
-  const scheduledMachines = new Set(optimized?.entries.map((entry) => entry.machineId) ?? []).size
+  const activity = (machineId: string) => {
+    const lane = lanes.get(machineId)
+    return machineActivity(lane ? (view === 'baseline' ? lane.baseline : lane.optimized) : [], at ?? 0)
+  }
 
   return (
     <div className={styles.page}>
-      <PageHeader
-        eyebrow={`${data.factory.name} · ${view === '3d' ? 'Factory-3D replay' : '2D production flow'}`}
-        title="3D factory"
-        actions={
-          <div className={styles.viewActions}>
-            <span className={styles.viewLabel}>View type</span>
-            <SegmentedToggle
-              ariaLabel="View type"
-              value={view}
-              onChange={(value) => setView(value === '3d' ? '3d' : '2d')}
-              options={[
-                { value: '2d', label: '2D floor plan' },
-                { value: '3d', label: '3D model' },
-              ]}
-            />
-          </div>
-        }
-      />
+      <PageHeader eyebrow={`${data.factory.name} · planned schedule, not live telemetry`} title="Factory in action" />
+      <OptimizationStatus state={state} onRun={run} running={optimizing} compact />
 
-      <div className={styles.viewNotice} role="status">
-        {view === '3d'
-          ? `${data.factory.name} · Factory-3D opens in its own window and replays a stored schedule; the 3D scene is illustrative.`
-          : `${data.factory.name} · flow view from stored processes and dependencies; machine positions are not stored.`}
-      </div>
-
-      <div className={styles.stats} aria-label="Factory summary">
-        <StatTile label="Stages" value={plan.zones.length} />
-        <StatTile label="Machines" value={data.machines.length} />
-        <StatTile label="Scheduled machines" value={optimized ? `${scheduledMachines} of ${data.machines.length}` : NOT_AVAILABLE} sub={optimized ? 'Optimized schedule' : 'No optimized schedule yet'} />
-        <StatTile
-          label="Solar share"
-          value={totals.solarSharePct === null ? NOT_AVAILABLE : `${formatNumber(totals.solarSharePct)}%`}
-          provenance={totals.solarSharePct === null ? undefined : <ProvenanceTag provenance="modeled" />}
-        />
-      </div>
-
-      {view === '3d' ? (
-        <section className={styles.threeDSlot} aria-label="Factory-3D model">
-          <div className={styles.threeDContent}>
-            <svg className={styles.modelIcon} viewBox="0 0 72 72" fill="none" aria-hidden="true">
-              <path d="m36 7 25 14v30L36 65 11 51V21L36 7Z" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-              <path d="m11 21 25 15 25-15M36 36v29m0-29L21 27m15 9 15-9" stroke="currentColor" strokeWidth="3" strokeLinejoin="round" />
-            </svg>
-            <h2>{data.factory.name} {'·'} 3D model</h2>
-            <p>
-              Factory-3D replays a stored schedule in an illustrative 3D scene. It is not a live view of machines and does not show telemetry.
-            </p>
-            <p>
-              3D visualization is currently available for selected factory configurations: the scene is modelled on the chocolate plant layout. Machines of {data.factory.name} without a scene position are listed as unplaced, so the 2D floor plan is the reliable layout view for other factories.
-            </p>
-            <div className={styles.threeDActions}>
-              {optimized && (
-                <Button variant="primary" onClick={() => window.open(factory3dUrl(FACTORY_3D_URL, data.factory.id, optimized.id), '_blank', 'noopener,noreferrer')}>
-                  Open optimized schedule in 3D
-                </Button>
-              )}
-              {baseline && (
-                <Button variant="secondary" onClick={() => window.open(factory3dUrl(FACTORY_3D_URL, data.factory.id, baseline.id), '_blank', 'noopener,noreferrer')}>
-                  Open baseline in 3D
-                </Button>
-              )}
-              <Button variant="secondary" onClick={() => setView('2d')}>Show 2D floor plan instead</Button>
-            </div>
-            {!optimized && !baseline && <p>No stored schedule is available to replay yet. Run optimization first.</p>}
-          </div>
+      {results && (
+        <section className={styles.stats} aria-label="Energy summary">
+          {scope.enabled && <StatTile label="Solar used" value={formatKwh(outcome.optimized.solarKwh)} sub={outcome.comparable ? `before: ${formatKwh(outcome.baseline.solarKwh)}` : 'after SolarShift'} provenance={modeled} />}
+          {scope.enabled && <StatTile label="Grid energy" value={formatKwh(outcome.optimized.gridKwh)} sub={outcome.comparable ? `before: ${formatKwh(outcome.baseline.gridKwh)}` : 'after SolarShift'} provenance={modeled} />}
+          {scope.enabled && <StatTile label="Grid energy saved" value={outcome.gridSavedKwh === null ? 'Not available' : formatKwh(outcome.gridSavedKwh)} sub="vs before" provenance={outcome.gridSavedKwh === null ? undefined : modeled} />}
+          {!scope.enabled && <StatTile label="Processes re-timed" value={`${insight.moved.length} of ${insight.moves.length}`} sub="by the optimizer" provenance={<ProvenanceTag provenance="planned" label="Optimizer output" />} />}
+          <StatTile label="Modeled cost saved" value={outcome.costSaved === null ? 'Not available' : formatCurrency(outcome.costSaved, currency)} sub={`now ${formatCurrency(outcome.optimized.cost, currency)} (energy charge only)`} provenance={outcome.costSaved === null ? undefined : modeled} />
         </section>
-      ) : (
-        <FactoryFloorPlan data={data} selectedMachineId={selectedMachineId} onSelectMachine={setSelectedMachineId} />
       )}
+
+      {results && series.length > 0 && point && at !== null ? (
+        <>
+          <div className={styles.player} role="group" aria-label="Plan time">
+            <Button variant="primary" onClick={() => {
+              if (!playing && index >= lastIndex) setHourIndex(0)
+              setPlaying(!playing)
+            }}>
+              {playing ? '❚❚ Pause' : '▶ Play the day'}
+            </Button>
+            <label className={styles.timePicker}>
+              <span className="visually-hidden">Plan time</span>
+              <input type="range" min={0} max={lastIndex} value={index} onChange={(event) => { setPlaying(false); setHourIndex(Number(event.target.value)) }} aria-valuetext={clock(point.start, timeZone)} />
+              <strong>{clock(point.start, timeZone)}–{clock(point.start + HOUR, timeZone, false)}</strong>
+            </label>
+            <SegmentedToggle options={viewOptions} value={view} onChange={(value) => setView(value as 'baseline' | 'optimized')} ariaLabel="Schedule shown" />
+          </div>
+
+          <Card title={`Power at ${clock(point.start, timeZone)}`} provenance={scope.enabled && solarTag ? <ProvenanceTag provenance={solarTag.provenance} label={`Solar: ${solarTag.label}`} /> : undefined}>
+            <div className={styles.power}>
+              {(scope.enabled
+                ? [
+                    { label: 'Solar available', value: solarKw, className: styles.barSolar },
+                    { label: 'Factory demand', value: demand, className: styles.barLoad },
+                    { label: 'From the grid', value: gridKw, className: styles.barGrid },
+                  ]
+                : [{ label: 'Factory demand', value: demand, className: styles.barLoad }]
+              ).map((row) => (
+                <div key={row.label} className={styles.powerRow}>
+                  <span>{row.label}</span>
+                  <span className={styles.powerTrack}><span className={row.className} style={{ width: `${((row.value ?? 0) / scale) * 100}%` }} /></span>
+                  <strong>{row.value === null ? 'Not available' : formatKw(row.value)}</strong>
+                </div>
+              ))}
+            </div>
+            <p className={styles.note}>
+              {!demand ? 'No machine is scheduled in this hour.' : !scope.enabled ? `Planned factory demand ${formatKw(demand)}.` : gridKw === 0 ? 'All of this hour’s demand is covered by solar.' : solarKw ? `Solar covers ${Math.round(Math.min(1, solarKw / demand) * 100)}% of demand; the rest comes from the grid.` : 'No solar in this hour, so all demand comes from the grid.'}
+              {point.price !== null ? ` Electricity price: ${point.price.toLocaleString('en-GB', { maximumFractionDigits: 3 })} ${currency}/kWh.` : ''}
+            </p>
+          </Card>
+
+          <Card title="2D process view" provenance={<ProvenanceTag provenance="planned" label="Optimizer output" />}>
+            <p className={styles.note}>Production flows left to right, top to bottom. Highlighted machines are running at {clock(point.start, timeZone, false)} in the {view === 'baseline' ? `${scope.before.toLowerCase()} schedule` : scope.enabled ? 'SolarShift schedule' : 'optimized schedule'}. Select a machine for details.</p>
+            <ol className={styles.flow}>
+              {plan.zones.map((zone) => (
+                <li key={zone.number} className={styles.zone}>
+                  <span className={styles.zoneTitle}><b>{zone.number}</b> {zone.title}</span>
+                  {zone.machineIds.map((machineId) => {
+                    const label = labels.get(machineId)
+                    const now = activity(machineId)
+                    const moved = now.current?.moved && view === 'optimized'
+                    return (
+                      <button
+                        key={machineId}
+                        type="button"
+                        className={`${styles.machine} ${now.state === 'running' ? (moved ? styles.movedRunning : styles.running) : now.state === 'done' ? styles.done : ''} ${selectedMachine === machineId ? styles.selected : ''}`}
+                        aria-pressed={selectedMachine === machineId}
+                        onClick={() => setSelectedMachine((current) => (current === machineId ? '' : machineId))}
+                      >
+                        <span className={styles.machineTop}>
+                          <span className={styles.machineCode}>{label?.code}</span>
+                          <span className={styles.machineState}>{now.state === 'running' ? 'Running' : now.state === 'done' ? 'Finished' : now.state === 'waiting' ? 'Waiting' : 'Not used'}</span>
+                        </span>
+                        <strong>{label?.name ?? 'Unknown machine'}</strong>
+                        {now.current ? (
+                          <span className={styles.machineJob}>{now.current.label}{now.current.powerKw !== null ? ` · ${formatKw(now.current.powerKw)}` : ''}</span>
+                        ) : now.next ? (
+                          <span className={styles.machineNext}>Next: {now.next.label} at {clock(now.next.start, timeZone)}</span>
+                        ) : null}
+                        {moved && <span className={styles.movedTag}>{movedLabel}</span>}
+                      </button>
+                    )
+                  })}
+                </li>
+              ))}
+            </ol>
+            <ul className={styles.legend} aria-label="Legend">
+              <li><i className={styles.keyRunning} />Running</li>
+              <li><i className={styles.keyMoved} />Running · {movedLabel.toLowerCase()}</li>
+              <li><i className={styles.keyIdle} />Waiting / not used</li>
+              <li><i className={styles.keyDone} />Finished</li>
+            </ul>
+          </Card>
+        </>
+      ) : (
+        <Card title="2D process view">
+          <p className={styles.note}>Machine activity appears once {data.factory.name} has an optimized schedule.</p>
+        </Card>
+      )}
+
+      {selected && (
+        <Card title={selected.label} action={<Button variant="secondary" onClick={() => setSelectedMachine('')}>Close</Button>}>
+          {selectedMoves.length === 0 ? (
+            <p className={styles.note}>No scheduled process runs on this machine.</p>
+          ) : (
+            <ul className={styles.machineProcesses}>
+              {selectedMoves.map((move) => {
+                const entry = optimizedEntries.get(move.processId)
+                const before = baselineEntries.get(move.processId)
+                const energy = entry && typeof entry.energyKwh === 'number' ? entry.energyKwh : null
+                const reasons = moveReasons(move, insight.moves, data.dependencies).filter((reason) => scope.enabled || reason !== 'More solar')
+                return (
+                  <li key={move.processId}>
+                    <strong>{move.processName}</strong>
+                    <span className={styles.badge}>{move.moved ? movedLabel : 'Unchanged'}</span>
+                    <dl>
+                      <div><dt>Before</dt><dd>{clock(move.baselineStart, timeZone)}</dd></div>
+                      <div><dt>After</dt><dd>{clock(move.optimizedStart, timeZone)}</dd></div>
+                      <div><dt>Duration</dt><dd>{formatDuration((move.optimizedEnd - move.optimizedStart) / 60_000)}</dd></div>
+                      <div><dt>Energy</dt><dd>{energy === null ? 'Not available' : formatKwh(energy)}</dd></div>
+                      {scope.enabled && <div><dt>Solar / grid</dt><dd>{metadataNumber(entry?.metadata, 'solar_kwh') === null ? 'Not available' : `${formatKwh(metadataNumber(entry?.metadata, 'solar_kwh'))} / ${formatKwh(metadataNumber(entry?.metadata, 'grid_kwh'))}`}{before && metadataNumber(before.metadata, 'solar_kwh') !== null ? ` (before: ${formatKwh(metadataNumber(before.metadata, 'solar_kwh'))} solar)` : ''}</dd></div>}
+                      {move.moved && <div><dt>Reason</dt><dd>{reasons.length ? reasons.join(' · ') : 'Re-timed by the optimizer'}</dd></div>}
+                    </dl>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </Card>
+      )}
+
+      <Card title="3D factory">
+        {placed > 0 && shownSchedule ? (
+          <>
+            <p className={styles.note}>
+              The 3D scene shows the same {view === 'baseline' ? 'before' : 'SolarShift'} schedule and follows the time above.
+              {` ${placed} of ${data.machines.length} machines have a place in the chocolate-plant scene.`} It is a visualization of the plan, not a live view.
+            </p>
+            <Factory3DEmbed key={shownSchedule.id} baseUrl={FACTORY_3D_URL} factoryId={data.factory.id} scheduleId={shownSchedule.id} at={at} onTimeChange={syncFrom3d} />
+          </>
+        ) : placed > 0 ? (
+          <p className={styles.note}>Run the optimizer first; the 3D scene replays the optimized schedule.</p>
+        ) : (
+          <p className={styles.note}>
+            The 3D scene is built for the chocolate-plant layout, so it is available for the Demo Chocolate Factory only. For {data.factory.name}, the 2D process view above shows the same schedule.
+          </p>
+        )}
+      </Card>
     </div>
   )
 }

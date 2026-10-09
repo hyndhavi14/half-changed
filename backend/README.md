@@ -269,7 +269,8 @@ Query strings are limited to 8 KiB and 64 parameters.
 Bulk schemas also retain their explicit row limits (energy intervals and
 schedule entries: 5,000 each; dependency edges: 500).
 
-The optimizer's default timeout is 60 seconds, and configured values may not
+The optimizer's default timeout is 180 seconds (the Python optimizer runs a baseline
+and an optimized solve, each limited to 60 seconds), and configured values may not
 exceed five minutes. The deadline covers the HTTP request, response-body read,
 and decoding. Upstream response bodies, raw connection errors, and configured
 URLs are not included in client-facing 502 details. Health-check failures also
@@ -537,6 +538,23 @@ BYTEME_OPTIMIZER_API_KEY=          # only if authenticated
 If any one is missing, the adapter still refuses and explains exactly which one.
 `decodeSolution()` in `lib/optimizer/client.ts` is the single function to
 replace if the Python service answers with its own response shape.
+
+### Checking the local Python optimizer
+
+Run `npm run optimizer:check` in this folder. It reads `.env.local`, starts the configured
+Python with the same reduced environment the backend uses, and prints `READY` or the exact fix:
+missing `BYTEME_OPTIMIZER_*` settings, a placeholder or Microsoft Store Python path, a working
+directory without the `optimizer` package, or OR-Tools not installed.
+
+When Python fails during a run, the API reports the cause (for example `missing_ortools`,
+`optimizer_package_not_found`, `python_not_found`, `blocked_by_application_control`) and the
+backend terminal prints Python's stderr. Stack traces and paths are never sent to the browser.
+
+**Windows Application Control (error 4551).** Some managed Windows PCs block OR-Tools' native
+DLLs ("An Application Control policy has blocked this file"). That is a security policy: do not
+try to bypass it. Run the backend and optimizer on a computer or environment where OR-Tools is
+allowed (another PC, or a Linux environment such as GitHub Codespaces), or ask the administrator
+to allow it.
 
 ### Questions for your teammate
 

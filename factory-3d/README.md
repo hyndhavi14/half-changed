@@ -34,7 +34,7 @@ const provider = new MockMachineDataProvider();   // create once, keep stable
 </div>
 ```
 
-`FactoryTwin` fills its parent. Its CSS is scoped under `.bm-twin`, so it won't leak into the host page. Load the two brand fonts in the host page (see `index.html`):  Fraunces (headings) and Atkinson Hyperlegible (UI).
+`FactoryTwin` fills its parent. Its CSS is scoped under `.bm-twin`, so it won't leak into the host page. Load the two brand fonts in the host page (see `index.html`):  Fraunces (headings) and Inter (UI).
 
 The API provider is also available when embedding the twin in another host.
 For the Phase 6 separately served application, configure ignored local
@@ -66,7 +66,8 @@ only the fixed slug crosswalk chooses a scene geometry key. Machine state,
 current power and solar output remain **Not reported** because the backend
 provides no live telemetry. Schedule entries retain their UUIDs and exact
 offset-aware timestamps and are labeled as planned intervals; schedule status
-is not machine status. API mode disables simulation, debug state editing and
+is not machine status. (Machine status shown in backend mode is the *planned* state at the
+selected plan time — see "Embedded in the ByteMe frontend" below — never live telemetry.) API mode disables simulation, debug state editing and
 demo product animation. Scene geometries without a backend slug mapping are
 hidden and listed as unplaced; no backend machines are fabricated to fill the
 11-position scene.
@@ -76,6 +77,23 @@ PV asset, while the 3D scene has eleven fixed layout machines. The explicit
 crosswalk currently places the six matching production assets only; the PV
 asset and unmatched scene positions remain unplaced. Full scene/seed parity is
 not claimed.
+
+## Embedded in the ByteMe frontend (planned schedule playback)
+
+The frontend's **3D Factory** page embeds this app in an iframe (`?factoryId=…&scheduleId=…&embed=1`).
+When embedded:
+
+- The app sends `byteme-3d-ready` to the parent page and accepts the signed-in Supabase session
+  back through `postMessage`, so there is no second sign-in. Messages are only accepted from the
+  origins in `VITE_FRONTEND_ORIGIN` (comma-separated; default `http://localhost:5173,http://127.0.0.1:5173`).
+  Tokens are never put in the URL.
+- The plan time is shared both ways with the page's 2D time slider.
+
+In backend mode (embedded or not) the scene shows the **planned** state of the stored schedule at the
+selected plan time: a machine is *Running* while a schedule entry covers that time, otherwise *Idle*.
+Planned power comes from the entry (or the machine's rated power), and solar comes from the stored
+site energy readings for that hour. Use the **Play** control at the bottom to step through the plan.
+This is a visualization of the optimizer's plan, not live telemetry.
 
 ## Public SolarShift historical replay
 

@@ -12,9 +12,11 @@ import { formatDuration } from '../../data/format'
 import { processStages } from '../../data/stageView'
 import styles from './ProcessesPage.module.css'
 
+/** Finish-to-start without lag is the normal case, so only other rules get a note. */
 function dependencyText(type: string, lag: number): string {
-  const kind = type.replaceAll('_', ' ')
-  return lag ? `${kind}, lag ${lag} min` : kind
+  const kind = type === 'finish_to_start' ? '' : type.replaceAll('_', ' ')
+  const parts = [kind, lag ? `lag ${lag} min` : ''].filter(Boolean)
+  return parts.length ? ` (${parts.join(', ')})` : ''
 }
 
 export default function ProcessesPage() {
@@ -29,17 +31,27 @@ export default function ProcessesPage() {
   const labelOf = new Map(labels.map((label) => [label.id, label]))
   const flow = processStages(data.processes, data.dependencies)
   const activeCount = data.processes.filter((process) => process.isActive).length
+  const showType = data.machines.some((machine) => machine.type)
+  const showMachineStatus = data.machines.some((machine) => !machine.isActive)
+  const showProcessStatus = data.processes.some((process) => !process.isActive)
   const parents = (processId: string) => data.dependencies.filter((edge) => edge.processId === processId)
 
   return (
     <div className={styles.page}>
       <PageHeader eyebrow={`${data.factory.name} · ${data.factory.timezone}`} title={`${data.factory.name} · production`} />
 
+      {(data.factory.description || typeof data.factory.config.optimizer_config_key === 'string') && (
+        <p className={styles.note}>
+          {typeof data.factory.config.optimizer_config_key === 'string' ? `Factory type: ${String(data.factory.config.optimizer_config_key)}. ` : ''}
+          {data.factory.description ?? ''}
+        </p>
+      )}
+
       <section className={styles.stats} aria-label="Factory configuration">
         <StatTile label="Machines" value={data.machines.length} sub={`${data.machines.filter((machine) => machine.isActive).length} active`} />
         <StatTile label="Processes" value={data.processes.length} sub={`${activeCount} active`} />
         <StatTile label="Dependencies" value={data.dependencies.length} sub="process order rules" />
-        <StatTile label="Production orders" value={data.orders.length} sub="stored, not scheduled" />
+        {data.orders.length > 0 && <StatTile label="Production orders" value={data.orders.length} sub="stored, not scheduled" />}
       </section>
 
       <Card title="Production flow" provenance={<ProvenanceTag provenance="recorded" label="Factory configuration" />}>
@@ -80,9 +92,9 @@ export default function ProcessesPage() {
                 <th scope="col">Code</th>
                 <th scope="col">Machine</th>
                 <th scope="col">Stage</th>
-                <th scope="col">Type</th>
+                {showType && <th scope="col">Type</th>}
                 <th scope="col">Rated power</th>
-                <th scope="col">Status</th>
+                {showMachineStatus && <th scope="col">Status</th>}
                 <th scope="col">Planned load</th>
               </tr>
             </thead>
@@ -94,9 +106,9 @@ export default function ProcessesPage() {
                     <td>{labelOf.get(machine.id)?.code ?? '—'}</td>
                     <th scope="row">{machine.name}</th>
                     <td>{labelOf.get(machine.id)?.stage ? `Stage ${labelOf.get(machine.id)?.stage}` : 'No assigned process'}</td>
-                    <td>{machine.type ? machine.type.replaceAll('_', ' ') : NOT_AVAILABLE}</td>
+                    {showType && <td>{machine.type ? machine.type.replaceAll('_', ' ') : NOT_AVAILABLE}</td>}
                     <td>{displayValue(machine.ratedPowerKw, ' kW')}</td>
-                    <td><StatusChip status={machine.isActive ? 'Active' : 'Inactive'} /></td>
+                    {showMachineStatus && <td><StatusChip status={machine.isActive ? 'Active' : 'Inactive'} /></td>}
                     <td>
                       {load === null ? NOT_AVAILABLE : (
                         <div className={styles.utilization}>
@@ -133,7 +145,7 @@ export default function ProcessesPage() {
                 <th scope="col">Power</th>
                 <th scope="col">Quantity</th>
                 <th scope="col">Runs after</th>
-                <th scope="col">Status</th>
+                {showProcessStatus && <th scope="col">Status</th>}
               </tr>
             </thead>
             <tbody>
@@ -148,10 +160,10 @@ export default function ProcessesPage() {
                     <td>{process.quantity === null ? NOT_AVAILABLE : `${process.quantity}${process.unit ? ` ${process.unit}` : ''}`}</td>
                     <td className={styles.wrapCell}>
                       {after.length
-                        ? after.map((edge) => `${processName(data, edge.dependsOnProcessId)} (${dependencyText(edge.type, edge.lagMinutes)})`).join(', ')
+                        ? after.map((edge) => `${processName(data, edge.dependsOnProcessId)}${dependencyText(edge.type, edge.lagMinutes)}`).join(', ')
                         : 'No dependency'}
                     </td>
-                    <td><StatusChip status={process.isActive ? 'Active' : 'Inactive'} /></td>
+                    {showProcessStatus && <td><StatusChip status={process.isActive ? 'Active' : 'Inactive'} /></td>}
                   </tr>
                 )
               })}
@@ -166,6 +178,7 @@ export default function ProcessesPage() {
         </p>
       </Card>
 
+      {data.orders.length > 0 && (
       <Card title="Production orders" className={styles.machineCard}>
         <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="Production orders table, scrollable">
           <table className={styles.machineTable}>
@@ -201,6 +214,7 @@ export default function ProcessesPage() {
           Stored orders are not linked to processes, so the optimizer does not schedule them; they are shown as recorded.
         </p>
       </Card>
+      )}
     </div>
   )
 }

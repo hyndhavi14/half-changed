@@ -287,7 +287,9 @@ cross join generate_series(
   interval '15 minutes'
 ) as t(ts)
 where f.slug = 'demo-chocolate-factory'
-on conflict do update set
+-- The conflict target must name the unique index energy_data_unique_interval_idx;
+-- Postgres rejects `on conflict do update` without one.
+on conflict (factory_id, coalesce(machine_id, '00000000-0000-0000-0000-000000000000'::uuid), recorded_at) do update set
   generation_kwh = excluded.generation_kwh,
   source = excluded.source;
 
@@ -299,7 +301,7 @@ insert into public.electricity_tariffs
    energy_price_per_kwh, demand_charge_per_kw, fixed_charge, tax_rate,
    effective_from, priority, metadata)
 select f.id, v.slug, v.name, 'EUR', v.start_time, v.end_time, v.days_of_week,
-       v.price, v.demand, v.fixed, v.tax, now(), v.priority, v.metadata::jsonb
+       v.price, v.demand, v.fixed, v.tax, date_trunc('day', now()), v.priority, v.metadata::jsonb
 from public.factories f
 cross join (values
   ('off-peak',  'DEMO. Off-peak (night)',        '22:00'::time, '07:00'::time, null,
@@ -319,6 +321,8 @@ where f.slug = 'demo-chocolate-factory'
 on conflict (factory_id, slug) do update set
   name                 = excluded.name,
   currency             = excluded.currency,
+  -- Start at midnight so the tariff also covers today's earlier energy readings.
+  effective_from       = least(public.electricity_tariffs.effective_from, excluded.effective_from),
   start_time           = excluded.start_time,
   end_time             = excluded.end_time,
   days_of_week         = excluded.days_of_week,

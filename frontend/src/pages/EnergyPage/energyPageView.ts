@@ -87,6 +87,14 @@ export function defaultEnergyDay(rows: readonly Record<string, unknown>[], timeZ
   return best
 }
 
+/** Stored consumption, or null when the row says consumption was not recorded (never a fake zero). */
+export function recordedConsumption(row: Record<string, unknown>): number | null {
+  const metadata = row.metadata
+  if (typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>).consumption_recorded === false) return null
+  return toNumber(row.consumption_kwh)
+}
+
 /** 24 points for one local day. Hours without readings stay null and are drawn as "no reading". */
 export function fullDayPoints(rows: readonly Record<string, unknown>[], timeZone: string, day: string): EnergyChartPoint[] {
   const points: EnergyChartPoint[] = Array.from({ length: 24 }, (_, hour) => ({ hour, generationKwh: null, consumptionKwh: null }))
@@ -94,13 +102,15 @@ export function fullDayPoints(rows: readonly Record<string, unknown>[], timeZone
     const time = toTime(row.recorded_at)
     if (time === null || localDay(time, timeZone) !== day) continue
     const generation = toNumber(row.generation_kwh)
-    const consumption = toNumber(row.consumption_kwh)
-    if (generation === null || consumption === null) continue
+    const consumption = recordedConsumption(row)
+    const unrecorded = consumption === null && toNumber(row.consumption_kwh) !== null
+    // A malformed value drops the row; an explicitly unrecorded consumption keeps the generation.
+    if (generation === null || (consumption === null && !unrecorded)) continue
     const hour = Number(hourFormatter(timeZone).format(new Date(time)))
     if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue
     const point = points[hour]
     point.generationKwh = round((point.generationKwh ?? 0) + generation, 4)
-    point.consumptionKwh = round((point.consumptionKwh ?? 0) + consumption, 4)
+    if (consumption !== null) point.consumptionKwh = round((point.consumptionKwh ?? 0) + consumption, 4)
   }
   return points
 }
@@ -132,7 +142,7 @@ export function readingsSummary(rows: readonly Record<string, unknown>[], timeZo
   let first: number | null = null
   let last: number | null = null
   for (const row of rows) {
-    const c = toNumber(row.consumption_kwh)
+    const c = recordedConsumption(row)
     const g = toNumber(row.generation_kwh)
     if (c !== null) consumption = (consumption ?? 0) + c
     if (g !== null) generation = (generation ?? 0) + g
@@ -163,7 +173,7 @@ export function readingsSummaryText(summary: ReadingsSummary): string {
     ? (summary.firstDay === summary.lastDay ? summary.firstDay : `${summary.firstDay} to ${summary.lastDay}`)
     : 'dates not recorded'
   return `${summary.count} stored readings, ${interval}, ${range}. ` +
-    `Total consumption ${formatEnergy(summary.consumptionKwh)}, total generation ${formatEnergy(summary.generationKwh)}.`
+    `Total consumption ${summary.consumptionKwh === null ? 'not recorded' : formatEnergy(summary.consumptionKwh)}, total generation ${formatEnergy(summary.generationKwh)}.`
 }
 
 // ---------------------------------------------------------------- planned (optimized schedule) energy

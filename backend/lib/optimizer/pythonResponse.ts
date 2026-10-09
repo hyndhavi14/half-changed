@@ -52,12 +52,23 @@ function sameNumber(left: number, right: number): boolean {
   return Math.abs(left - right) < 1e-8
 }
 
+// Python reports times in hours, so a whole minute such as 7 arrives as 7/60 h.
+// Multiplying back by 60 can leave binary floating-point noise (7.000000000000001),
+// so a value counts as a whole minute when it is within one microminute of one.
+// Genuinely fractional minutes (for example 0.01 h = 0.6 min) are still rejected.
+function exactMinutes(hours: number): number | null {
+  const minutes = hours * 60
+  const rounded = Math.round(minutes)
+  return Number.isSafeInteger(rounded) && Math.abs(minutes - rounded) < 1e-6 ? rounded : null
+}
+
 function minuteAligned(hours: number): boolean {
-  return Number.isSafeInteger(hours * 60)
+  return exactMinutes(hours) !== null
 }
 
 function toIso(horizonStart: number, relativeHours: number): string {
-  const milliseconds = relativeHours * 60 * 60 * 1000
+  const minutes = exactMinutes(relativeHours)
+  const milliseconds = minutes === null ? Number.NaN : minutes * 60_000
   if (!Number.isSafeInteger(milliseconds) || !Number.isFinite(new Date(horizonStart + milliseconds).getTime())) {
     reject('Python schedule time cannot be represented exactly in milliseconds.')
   }

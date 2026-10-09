@@ -201,6 +201,24 @@ describe('decodePythonResponse', () => {
     })
   })
 
+  it('accepts every whole minute of a day despite floating-point noise in hours', () => {
+    const input = structuredClone(problem)
+    input.horizon.end = '2026-03-03T08:00:00.000Z'
+    input.processes[0]!.durationMinutes = 1
+    for (let minute = 0; minute < 24 * 60; minute += 1) {
+      const raw = response()
+      const result = raw.result as {
+        optimized: { makespan_hours: number; processes: Array<Record<string, unknown>> }
+      }
+      result.optimized.makespan_hours = (minute + 1) / 60
+      result.optimized.processes[0]!.start_time = minute / 60
+      result.optimized.processes[0]!.end_time = (minute + 1) / 60
+      result.optimized.processes[0]!.duration_hours = 1 / 60
+      const solution = decodePythonResponse(raw, input, [])
+      expect(Date.parse(solution.entries[0]!.startsAt)).toBe(Date.parse('2026-03-02T08:00:00.000Z') + minute * 60_000)
+    }
+  })
+
   it('rejects a non-minute relative start rather than rounding it', () => {
     const raw = response()
     const result = raw.result as {

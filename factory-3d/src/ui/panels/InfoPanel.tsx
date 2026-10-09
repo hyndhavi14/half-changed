@@ -7,10 +7,16 @@ import { DEFAULT_MESSAGES, STATUS, statusCss } from '../../config/statusStyles';
 import { MACHINE_DESCRIPTIONS } from '../../data/mock/machineDescriptions';
 import type { MachineData } from '../../data/types';
 import { cameraApi } from '../../three/cameras/cameraApi';
+import { usePlanStore } from '../../state/planStore';
+import { clockIn } from '../../data/planned';
 
 const fmtDur = (m: number | null) => (m === null ? 'Not available' : m < 60 ? `${m} min` : `${m} min (${Math.round(m / 6) / 10} h)`);
 
-function stateText(m: MachineData) {
+function stateText(m: MachineData, planned: boolean) {
+  if (planned) {
+    if (m.status === 'running') return `${m.message ?? 'Planned run'} until ${m.end_time}.`;
+    return m.start_time && m.message?.startsWith('Next') ? `${m.message} at ${m.start_time}.` : m.message ?? 'Idle.';
+  }
   if (m.status === 'unknown') return 'Operational status is not reported by the backend.';
   if (m.status === 'running') return `Processing the current batch until ${m.end_time}.`;
   if (m.status === 'idle') return m.start_time ? `Waiting. The next batch starts at ${m.start_time}.` : 'Idle.';
@@ -25,6 +31,7 @@ function powerText(m: MachineData) {
       : `Current draw not reported · ${rated} kW rated`;
   }
   if (m.status === 'running' || m.status === 'warning') return `${m.power_kw} kW`;
+  if (m.status === 'idle' && m.power_kw === 0) return m.rated_power_kw ? `Not running · ${m.rated_power_kw} kW rated` : 'Not running';
   if (m.status === 'idle') return `${Math.round(m.power_kw * 0.1 * 10) / 10} kW standby (${m.power_kw} kW rated)`;
   return `0 kW (${m.power_kw} kW rated)`;
 }
@@ -36,7 +43,10 @@ export function InfoPanel({ readOnly = false }: { readOnly?: boolean }) {
   const m = useMachineStore((s) => (selectedId ? s.machines[selectedId] : undefined));
   const schedule = useScheduleStore((s) => s.schedule);
   const e = useEnergyNow();
+  const planAt = usePlanStore((s) => s.at);
+  const timeZone = usePlanStore((s) => s.timeZone);
   if (!m) return null;
+  const planned = planAt !== null;
 
   const layoutId = m.layout_id ?? m.machine_id;
   const def = LAYOUT_BY_ID[layoutId as MachineId];
@@ -68,48 +78,45 @@ export function InfoPanel({ readOnly = false }: { readOnly?: boolean }) {
         <span>{STATUS[m.status]?.label ?? m.status}</span>
       </span>
       <dl>
-        <dt>Machine ID</dt>
-        <dd>{m.machine_id}</dd>
-        <dt>Power</dt>
+        {!readOnly && (
+          <>
+            <dt>Machine ID</dt>
+            <dd>{m.machine_id}</dd>
+          </>
+        )}
+        <dt>{planned ? 'Planned power' : 'Power'}</dt>
         <dd>{powerText(m)}</dd>
         <dt>Production</dt>
         <dd>{fmtDur(m.production_duration_minutes)}</dd>
-        <dt>Schedule</dt>
+        <dt>{planned && m.status !== 'running' ? 'Next run' : 'Schedule'}</dt>
         <dd>
-          {m.start_time ?? '–'} to {m.end_time ?? '–'}
+          {m.start_time ? `${m.start_time} to ${m.end_time ?? '–'}` : 'No run planned'}
         </dd>
         <dt>Energy</dt>
         <dd>{source}</dd>
       </dl>
-      <p className="state">{stateText(m)}</p>
+      <p className="state">{stateText(m, planned)}</p>
       {schedule && (
         <section className="planned-schedule" aria-label="Planned schedule intervals">
-          <h3>
-            Planned intervals · v{schedule.version} · {schedule.status}
-          </h3>
+          <h3>Planned runs on this machine</h3>
           {plannedEntries.length === 0 ? (
             <p>No entries for this machine in the selected schedule.</p>
           ) : (
             <ol>
               {plannedEntries.map((entry) => (
                 <li key={entry.id}>
-                  <strong>Process UUID</strong>
-                  <span>{entry.process_name ? `${entry.process_name} · ${entry.process_id}` : entry.process_id}</span>
-                  {entry.machine_name && (
-                    <>
-                      <strong>Assigned machine</strong>
-                      <span>{entry.machine_name}</span>
-                    </>
-                  )}
-                  <strong>Starts</strong>
-                  <time dateTime={entry.starts_at}>{entry.starts_at}</time>
-                  <strong>Ends</strong>
-                  <time dateTime={entry.ends_at}>{entry.ends_at}</time>
+                  <strong>{entry.process_name ?? 'Scheduled process'}</strong>
+                  <span>
+                    <time dateTime={entry.starts_at}>{clockIn(timeZone, Date.parse(entry.starts_at))}</time>
+                    {' – '}
+                    <time dateTime={entry.ends_at}>{clockIn(timeZone, Date.parse(entry.ends_at))}</time>
+                    {entry.power_kw != null ? ` · ${entry.power_kw} kW` : ''}
+                  </span>
                 </li>
               ))}
             </ol>
           )}
-          <p>Schedule entries are planned intervals, not machine operating status.</p>
+          <p>Planned by the optimizer; not measured machine status.</p>
         </section>
       )}
       <div className="row">

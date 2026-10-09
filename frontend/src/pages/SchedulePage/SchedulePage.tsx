@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import Button from '../../components/Button/Button'
+import MoveExplanation from '../../components/MoveExplanation/MoveExplanation'
+import OptimizationStatus from '../../components/OptimizationStatus/OptimizationStatus'
 import Card from '../../components/Card/Card'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
@@ -8,7 +10,10 @@ import SegmentedToggle from '../../components/SegmentedToggle/SegmentedToggle'
 import StatusChip from '../../components/StatusChip/StatusChip'
 import { useFactory } from '../../context/useFactory'
 import { formatDuration } from '../../data/format'
+import { moveReasons } from '../../data/factoryInsight'
+import { solarShiftScope } from '../../data/solarShiftScope'
 import { useFactoryInsight } from '../../data/useFactoryInsight'
+import { useOptimizationState } from '../../data/useOptimizationState'
 import { runDetails, scheduleComparability } from './schedulePageView'
 import styles from './SchedulePage.module.css'
 
@@ -35,10 +40,14 @@ export default function SchedulePage() {
 }
 
 function ScheduleWorkspace() {
-  const { backendData, runOptimization, optimizing, optimizationError } = useFactory()
+  const { backendData } = useFactory()
   const data = backendData!
   const insight = useFactoryInsight(data)
   const { pair, timeZone } = insight
+  const { state, optimizing, run: runOptimization } = useOptimizationState(data, pair)
+  const [selectedId, setSelectedId] = useState('')
+  const selected = insight.moves.find((move) => move.processId === selectedId)
+  const select = (processId: string) => setSelectedId((current) => (current === processId ? '' : processId))
   const both = Boolean(pair.baseline && pair.optimized)
   const [mode, setMode] = useState<GanttMode>(both ? 'compare' : pair.optimized ? 'optimized' : 'baseline')
   const comparability = pair.baseline && pair.optimized ? scheduleComparability(pair.baseline, pair.optimized) : null
@@ -47,6 +56,13 @@ function ScheduleWorkspace() {
   const names = new Map(data.processes.map((process) => [process.id, process.name]))
   const labels = new Map(insight.labels.map((label) => [label.id, label.label]))
   const single = !both ? (pair.optimized ?? pair.baseline) : undefined
+  const showSolar = solarShiftScope(data.factory).enabled
+  const reasonsFor = (move: (typeof insight.moves)[number]) =>
+    moveReasons(move, insight.moves, data.dependencies).filter((reason) => showSolar || reason !== 'More solar')
+  const after = (processId: string) => {
+    const parents = data.dependencies.filter((dependency) => dependency.processId === processId).map((dependency) => names.get(dependency.dependsOnProcessId) ?? 'Unknown process')
+    return parents.join(', ')
+  }
 
   return (
     <div className={styles.page}>
@@ -58,12 +74,7 @@ function ScheduleWorkspace() {
         ) : undefined}
       />
 
-      {optimizationError && (
-        <Card title="Optimization failed">
-          <p className={styles.optimizationError} role="alert">{optimizationError}</p>
-          <Button variant="primary" isLoading={optimizing} onClick={() => void runOptimization()}>Try again</Button>
-        </Card>
-      )}
+      <OptimizationStatus state={state} onRun={runOptimization} running={optimizing} compact />
 
       <Card
         title={mode === 'compare' ? 'Baseline vs optimized timeline' : mode === 'baseline' ? 'Baseline timeline' : 'Optimized timeline'}
@@ -73,7 +84,7 @@ function ScheduleWorkspace() {
           <>
             <p className={styles.mutedNote}>
               {mode === 'compare'
-                ? 'Solid blocks are the optimized plan. A dashed outline marks where a process ran in the baseline. Machine names come from this factory’s stored data.'
+                ? 'Solid blocks are the optimized plan; a dashed outline marks where a process ran in the baseline. Select a block or a table row for its details.'
                 : 'Machine names come from this factory’s stored data. Hover a block for its exact times and power.'}
             </p>
             <ScheduleGantt
@@ -84,15 +95,24 @@ function ScheduleWorkspace() {
               bands={insight.bands}
               marker={Number.isFinite(horizonEnd) ? { at: horizonEnd, label: `Planning horizon ends ${clock(horizonEnd, timeZone)} (deadline)` } : undefined}
               ariaLabel={`${data.factory.name} schedule timeline`}
+              onSelect={both ? select : undefined}
+              selectedId={selectedId}
             />
           </>
         ) : (
           <div className={styles.emptySchedule}>
             <p>{data.factory.name} has no stored schedule yet.</p>
-            <Button variant="primary" isLoading={optimizing} onClick={() => void runOptimization()}>Run optimization</Button>
+            <Button variant="primary" isLoading={optimizing} onClick={runOptimization}>Run optimization</Button>
           </div>
         )}
       </Card>
+
+      {selected && (
+        <section className={styles.detailPanel} aria-label={`${selected.processName} details`}>
+          <MoveExplanation move={selected} checks={insight.checks} timeZone={timeZone} currency={insight.currency} variant="row" showSolar={showSolar} />
+          <Button variant="secondary" onClick={() => setSelectedId('')}>Close details</Button>
+        </section>
+      )}
 
       {comparability && !comparability.comparable && (
         <p role="note" className={styles.comparabilityNote}>
@@ -104,7 +124,7 @@ function ScheduleWorkspace() {
         <Card title="Schedule detail" provenance={<ProvenanceTag provenance="planned" label="Optimizer output" />}>
           <div className={styles.tableScroller} tabIndex={0} role="region" aria-label="Schedule detail table, scrollable">
             <table className={styles.shiftTable}>
-              <caption className={styles.visuallyHidden}>Every scheduled process with machine, timing, duration, power and change</caption>
+              <caption className={styles.visuallyHidden}>Every scheduled process with machine, dependencies, timing, duration, power and change</caption>
               <thead>
                 <tr>
                   <th scope="col">Process</th>
@@ -118,9 +138,14 @@ function ScheduleWorkspace() {
               </thead>
               <tbody>
                 {both && insight.moves.map((move) => (
-                  <tr key={move.processId}>
-                    <th scope="row">{move.processName}</th>
-                    <td>{move.machineLabel}</td>
+                  <tr key={move.processId} className={move.processId === selectedId ? styles.selectedRow : undefined}>
+                    <th scope="row">
+                      <button type="button" className={styles.rowButton} aria-pressed={move.processId === selectedId} onClick={() => select(move.processId)}>
+                        {move.processName}
+                      </button>
+                      {after(move.processId) && <span className={styles.afterText}>after {after(move.processId)}</span>}
+                    </th>
+                    <td className={styles.machineCell}>{move.machineLabel}</td>
                     <td className={move.moved ? styles.was : undefined}>{clock(move.baselineStart, timeZone)} – {clock(move.baselineEnd, timeZone).replace(/^\w+ /, '')}</td>
                     <td className={styles.now}>{clock(move.optimizedStart, timeZone)} – {clock(move.optimizedEnd, timeZone).replace(/^\w+ /, '')}</td>
                     <td>{formatDuration((move.optimizedEnd - move.optimizedStart) / 60_000)}</td>
@@ -129,6 +154,9 @@ function ScheduleWorkspace() {
                       {move.moved
                         ? <StatusChip status="Running">{formatDuration(Math.abs(move.shiftMinutes))} {move.shiftMinutes > 0 ? 'later' : 'earlier'}</StatusChip>
                         : <StatusChip status="Idle">Unchanged</StatusChip>}
+                      {move.moved && reasonsFor(move).length > 0 && (
+                        <span className={styles.reasonText}>{reasonsFor(move).join(' · ')}</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -136,8 +164,11 @@ function ScheduleWorkspace() {
                   .sort((left, right) => Date.parse(left.startsAt) - Date.parse(right.startsAt))
                   .map((entry) => (
                     <tr key={entry.id}>
-                      <th scope="row">{names.get(entry.processId) ?? 'Unknown process'}</th>
-                      <td>{labels.get(entry.machineId) ?? 'Unknown machine'}</td>
+                      <th scope="row">
+                        {names.get(entry.processId) ?? 'Unknown process'}
+                        {after(entry.processId) && <span className={styles.afterText}>after {after(entry.processId)}</span>}
+                      </th>
+                      <td className={styles.machineCell}>{labels.get(entry.machineId) ?? 'Unknown machine'}</td>
                       <td className={styles.now}>{clock(Date.parse(entry.startsAt), timeZone)} – {clock(Date.parse(entry.endsAt), timeZone).replace(/^\w+ /, '')}</td>
                       <td>{formatDuration((Date.parse(entry.endsAt) - Date.parse(entry.startsAt)) / 60_000)}</td>
                       <td>{power(entry.powerKw)}</td>

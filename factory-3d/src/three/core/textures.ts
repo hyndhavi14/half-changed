@@ -186,7 +186,7 @@ export const TEX = {
     if (typeof document !== 'undefined' && document.fonts?.load) {
       Promise.all([
         document.fonts.load('700 92px Fraunces'),
-        document.fonts.load('400 40px "Atkinson Hyperlegible"'),
+        document.fonts.load('400 40px "Inter"'),
       ])
         .then(() => {
           const c = t.image as HTMLCanvasElement;
@@ -220,7 +220,7 @@ function drawSign(g: CanvasRenderingContext2D, w: number, h: number) {
   g.textBaseline = 'middle';
   g.fillText('ByteMe', 270, 110);
   g.fillStyle = '#D9C6AC';
-  g.font = '400 40px "Atkinson Hyperlegible", Arial, sans-serif';
+  g.font = '400 40px "Inter", Arial, sans-serif';
   g.fillText('Chocolate Works · Vizag', 274, 186);
 }
 

@@ -2,8 +2,13 @@ import { useCallback, useEffect, useMemo, useState, type CSSProperties, type For
 import type { Session } from '@supabase/supabase-js'
 import { FactoryTwin, MockMachineDataProvider } from '../twin'
 import { ApiMachineDataProvider } from '../data/providers/ApiMachineDataProvider'
+import { PlannedMachineDataProvider } from '../data/providers/PlannedMachineDataProvider'
+import { hourlySolarKw, planBounds, solarAt } from '../data/planned'
 import { supabase } from '../data/supabase'
 import { useEnergyStore } from '../state/energyStore'
+import { usePlanStore } from '../state/planStore'
+import { useScheduleStore } from '../state/scheduleStore'
+import { PlanTimePanel } from '../ui/panels/PlanTimePanel'
 import {
   isPublicSolarShiftCode,
   isPublicSolarShiftSchedule,
@@ -16,6 +21,11 @@ const API_BASE_URL = configuredApiBase
     ? configuredApiBase
     : `${configuredApiBase}/api/v1`
   : '/api/v1'
+/** Pages allowed to embed this app and hand it a session (never taken from the URL). */
+const HOST_ORIGINS = (import.meta.env.VITE_FRONTEND_ORIGIN ?? 'http://localhost:5173,http://127.0.0.1:5173')
+  .split(',')
+  .map((origin: string) => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean)
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 const pageStyle: CSSProperties = {
@@ -25,7 +35,7 @@ const pageStyle: CSSProperties = {
   padding: 24,
   background: '#f3eee5',
   color: '#2a1b12',
-  fontFamily: "'Atkinson Hyperlegible', 'Segoe UI', system-ui, sans-serif",
+  fontFamily: "'Inter', 'Segoe UI', system-ui, sans-serif",
 }
 
 const formStyle: CSSProperties = {
@@ -39,16 +49,120 @@ const formStyle: CSSProperties = {
   boxShadow: '0 8px 32px rgba(59, 36, 22, 0.12)',
 }
 
+/**
+ * Embedded in the ByteMe frontend: announce readiness to the allow-listed parent origin,
+ * accept the signed-in session and the plan time from it, and report time changes back.
+ */
+function useHostBridge(embedded: boolean) {
+  const [hostOrigin, setHostOrigin] = useState<string | null>(null)
+  useEffect(() => {
+    if (!embedded || window.parent === window) return
+    let attempts = 0
+    const announce = () => {
+      for (const origin of HOST_ORIGINS) window.parent.postMessage({ type: 'byteme-3d-ready' }, origin)
+    }
+    announce()
+    const timer = window.setInterval(() => {
+      attempts += 1
+      if (attempts > 10 || usePlanStore.getState().factoryName) window.clearInterval(timer)
+      else announce()
+    }, 1000)
+    const onMessage = (event: MessageEvent) => {
+      if (event.source !== window.parent || !HOST_ORIGINS.includes(event.origin)) return
+      const data = event.data as { type?: unknown; accessToken?: unknown; refreshToken?: unknown; at?: unknown } | null
+      if (!data || typeof data.type !== 'string') return
+      if (data.type === 'byteme-3d-session' && typeof data.accessToken === 'string' && typeof data.refreshToken === 'string') {
+        setHostOrigin(event.origin)
+        void supabase.auth.setSession({ access_token: data.accessToken, refresh_token: data.refreshToken })
+      } else if (data.type === 'byteme-3d-time' && typeof data.at === 'number' && Number.isFinite(data.at)) {
+        setHostOrigin(event.origin)
+        usePlanStore.getState().set({ at: data.at, playing: false, fromHost: true })
+      }
+    }
+    window.addEventListener('message', onMessage)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('message', onMessage)
+    }
+  }, [embedded])
+
+  useEffect(() => {
+    if (!hostOrigin) return
+    return usePlanStore.subscribe((state, previous) => {
+      if (state.at !== previous.at && state.at !== null && !state.fromHost) {
+        window.parent.postMessage({ type: 'byteme-3d-time', at: state.at }, hostOrigin)
+      }
+    })
+  }, [hostOrigin])
+}
+
+/** Keeps the planned machine states and the solar reading in step with the plan time. */
+function usePlanSync(planned: PlannedMachineDataProvider | null) {
+  useEffect(() => {
+    if (!planned) return
+    let alive = true
+    let profile: Map<number, number> | null = null
+    const plan = usePlanStore.getState()
+    plan.set({ at: null, start: null, end: null, playing: false })
+    void planned.base.getFactoryInfo().then((info) => {
+      if (!alive) return
+      usePlanStore.getState().set({ timeZone: info.timeZone, factoryName: info.name })
+      planned.setTimeZone(info.timeZone)
+    }).catch(() => undefined)
+    void planned.base.getProcessNames().then((names) => alive && planned.setProcessNames(names)).catch(() => undefined)
+
+    const applyTime = (at: number | null) => {
+      planned.setTime(at)
+      useEnergyStore.getState().setSolar(solarAt(profile, at))
+    }
+    const onSchedule = (schedule: ReturnType<typeof useScheduleStore.getState>['schedule']) => {
+      const bounds = planBounds(schedule)
+      if (!bounds) return
+      const current = usePlanStore.getState().at
+      const at = current !== null && current >= bounds.start && current < bounds.end ? current : bounds.start
+      usePlanStore.getState().set({ start: bounds.start, end: bounds.end, at })
+      void planned.base.getEnergyRows(new Date(bounds.start).toISOString(), new Date(bounds.end).toISOString())
+        .then((rows) => {
+          if (!alive) return
+          profile = hourlySolarKw(rows)
+          applyTime(usePlanStore.getState().at)
+        })
+        .catch(() => undefined)
+    }
+    onSchedule(useScheduleStore.getState().schedule)
+    const stopSchedule = useScheduleStore.subscribe((state, previous) => {
+      if (state.schedule !== previous.schedule) onSchedule(state.schedule)
+    })
+    const stopTime = usePlanStore.subscribe((state, previous) => {
+      if (state.at !== previous.at) applyTime(state.at)
+    })
+    return () => {
+      alive = false
+      stopSchedule()
+      stopTime()
+    }
+  }, [planned])
+}
+
 function AuthenticatedFactory3D() {
   const search = new URLSearchParams(window.location.search)
   const factoryId = search.get('factoryId') ?? ''
   const scheduleId = search.get('scheduleId') ?? ''
   const demoMode = search.get('demo') === 'true'
+  const embedded = search.get('embed') === '1'
   const mockProvider = useMemo(() => new MockMachineDataProvider(), [])
   const [session, setSession] = useState<Session | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [provider, setProvider] = useState<ApiMachineDataProvider | null>(null)
+  const [provider, setProvider] = useState<PlannedMachineDataProvider | null>(null)
+  const [waitingForHost, setWaitingForHost] = useState(embedded)
+  useHostBridge(embedded)
+  usePlanSync(provider)
+  useEffect(() => {
+    if (!waitingForHost) return
+    const timer = window.setTimeout(() => setWaitingForHost(false), 8000)
+    return () => window.clearTimeout(timer)
+  }, [waitingForHost])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(
     UUID.test(factoryId) && UUID.test(scheduleId)
@@ -59,7 +173,6 @@ function AuthenticatedFactory3D() {
     machines: string | null
     schedule: string | null
   }>({ machines: null, schedule: null })
-  const [unmappedMachines, setUnmappedMachines] = useState<string[]>([])
 
   const reportError = useCallback((failure: Error, resource: 'machines' | 'schedule') => {
     setRefreshErrors((current) => ({ ...current, [resource]: failure.message }))
@@ -87,7 +200,6 @@ function AuthenticatedFactory3D() {
   useEffect(() => {
     if (!session) {
       setProvider(null)
-      setUnmappedMachines([])
       return
     }
     if (!UUID.test(factoryId) || !UUID.test(scheduleId)) {
@@ -104,14 +216,10 @@ function AuthenticatedFactory3D() {
       onRecovery: clearRefreshError,
     })
     useEnergyStore.getState().setSolar(null)
-    setProvider(apiProvider)
+    setProvider(new PlannedMachineDataProvider(apiProvider))
     setError(null)
     setRefreshErrors({ machines: null, schedule: null })
-    void apiProvider.getMachines().then((machines) => {
-      setUnmappedMachines(
-        machines.filter((machine) => !machine.layout_id).map((machine) => `${machine.name} (${machine.machine_id})`),
-      )
-    }).catch((failure: unknown) => {
+    void apiProvider.getMachines().catch((failure: unknown) => {
       setError(failure instanceof Error ? failure.message : 'Backend machines could not be loaded.')
     })
   }, [session, factoryId, scheduleId, reportError, clearRefreshError])
@@ -166,34 +274,19 @@ function AuthenticatedFactory3D() {
           initialView="reset"
           simulate={false}
           readOnly
-          dataLabel="backend demo · status not reported"
-        />
-        <button
+          dataLabel="planned schedule · not live telemetry"
+          className={embedded ? 'is-embedded' : undefined}
+        >
+          <PlanTimePanel />
+        </FactoryTwin>
+        {!embedded && <button
           type="button"
           onClick={() => void signOut()}
           disabled={busy}
           style={{ position: 'fixed', zIndex: 25, right: 16, top: 16 }}
         >
           Sign out
-        </button>
-        {unmappedMachines.length > 0 && (
-          <aside
-            role="status"
-            style={{
-              position: 'fixed',
-              zIndex: 20,
-              left: 16,
-              bottom: 16,
-              maxWidth: 'min(560px, calc(100% - 32px))',
-              padding: '10px 14px',
-              borderRadius: 10,
-              background: '#fffcf6',
-              color: '#2a1b12',
-            }}
-          >
-            No scene geometry mapping for: {unmappedMachines.join(', ')}
-          </aside>
-        )}
+        </button>}
         {(refreshErrors.machines || refreshErrors.schedule) && (
           <div
             role="alert"
@@ -217,6 +310,10 @@ function AuthenticatedFactory3D() {
         )}
       </div>
     )
+  }
+
+  if (embedded && waitingForHost && !error) {
+    return <main style={pageStyle} role="status">Connecting to ByteMe…</main>
   }
 
   return (

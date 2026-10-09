@@ -65,7 +65,7 @@ const serverEnvSchema = z.object({
   /** Required. ByteMe will not default the response decoder. */
   BYTEME_OPTIMIZER_DECODER: z.string().default(''),
   BYTEME_OPTIMIZER_API_KEY: z.string().default(''),
-  BYTEME_OPTIMIZER_TIMEOUT_MS: z.coerce.number().int().positive().max(300_000).default(60_000),
+  BYTEME_OPTIMIZER_TIMEOUT_MS: z.coerce.number().int().positive().max(300_000).default(180_000),
 })
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>

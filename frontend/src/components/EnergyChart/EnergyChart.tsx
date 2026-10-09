@@ -75,7 +75,7 @@ export default function EnergyChart({
                 Number.isFinite(hour.generationKwh) ? hour.generationKwh : null
               const consumption = typeof hour.consumptionKwh === 'number' &&
                 Number.isFinite(hour.consumptionKwh) ? hour.consumptionKwh : null
-              const noData = measured && (generation === null || consumption === null)
+              const noData = measured && generation === null && consumption === null
               const hourLabel = `${String(hour.hour).padStart(2, '0')}:00`
               return (
               <div
@@ -83,7 +83,7 @@ export default function EnergyChart({
                 key={hour.hour}
                 title={noData
                   ? `${hourLabel} — no reading`
-                  : `${hourLabel} — ${firstSeriesLabel.toLowerCase()} ${generation} kWh, ${secondSeriesLabel.toLowerCase()} ${consumption} kWh`}
+                  : `${hourLabel} — ${firstSeriesLabel.toLowerCase()} ${generation ?? 'not recorded'}${generation === null ? '' : ' kWh'}, ${secondSeriesLabel.toLowerCase()} ${consumption ?? 'not recorded'}${consumption === null ? '' : ' kWh'}`}
                 aria-hidden="true"
               >
                 <div

@@ -9,6 +9,8 @@ interface MoveExplanationProps {
   currency: string
   /** "hero" = the dashboard recommendation; "row" = one entry in the SolarShift list. */
   variant?: 'hero' | 'row'
+  /** False outside the SolarShift demo: no solar reason and no grid-energy tile. */
+  showSolar?: boolean
 }
 
 type Mark = 'yes' | 'no' | 'unknown'
@@ -50,8 +52,15 @@ function moveReasons(move: ProcessMove, checks: PlanChecks | null, currency: str
   ]
 }
 
-export default function MoveExplanation({ move, checks, timeZone, currency, variant = 'hero' }: MoveExplanationProps) {
-  const reasons = moveReasons(move, checks, currency)
+export default function MoveExplanation({ move, checks, timeZone, currency, variant = 'hero', showSolar = true }: MoveExplanationProps) {
+  const allReasons = moveReasons(move, checks, currency).filter((_reason, index) => showSolar || index !== 0)
+  // Rows repeat for every process, so they keep only the energy reasons and fold the
+  // production-rule checks (identical for every process) into one line.
+  const energyReasons = showSolar ? 2 : 1
+  const rulesKept = allReasons.slice(energyReasons).every((reason) => reason.mark === 'yes')
+  const reasons = variant === 'row'
+    ? [...allReasons.slice(0, energyReasons), { mark: (rulesKept ? 'yes' : 'unknown') as Mark, text: rulesKept ? 'All production rules kept (order, machines, deadline)' : 'Production rules: see the constraints on the dashboard' }]
+    : allReasons
   const gridSaved = move.baselineGridKwh !== null && move.optimizedGridKwh !== null ? move.baselineGridKwh - move.optimizedGridKwh : null
   const costSaved = move.baselineCost !== null && move.optimizedCost !== null ? move.baselineCost - move.optimizedCost : null
   const direction = move.shiftMinutes > 0 ? 'later' : 'earlier'
@@ -85,10 +94,12 @@ export default function MoveExplanation({ move, checks, timeZone, currency, vari
       <div className={styles.impact}>
         <span className={styles.step}>Impact</span>
         <div className={styles.impactGrid}>
-          <div>
-            <strong>{gridSaved === null ? 'Not available' : formatKwh(gridSaved)}</strong>
-            <span>{gridSaved !== null && gridSaved < 0 ? 'more grid energy' : 'less grid energy'}</span>
-          </div>
+          {showSolar && (
+            <div>
+              <strong>{gridSaved === null ? 'Not available' : formatKwh(gridSaved)}</strong>
+              <span>{gridSaved !== null && gridSaved < 0 ? 'more grid energy' : 'less grid energy'}</span>
+            </div>
+          )}
           <div>
             <strong>{costSaved === null ? 'Not available' : formatCurrency(costSaved, currency)}</strong>
             <span>modeled cost reduction</span>

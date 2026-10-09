@@ -54,6 +54,9 @@ export interface OptimizerConfig {
 
 /** Maximum optimizer wait (including response-body parsing), in milliseconds. */
 export const MAX_OPTIMIZER_TIMEOUT_MS = 300_000
+// The Python optimizer solves a baseline and an optimized schedule, each with
+// its own 60-second solver limit, so one minute in total is not enough.
+export const DEFAULT_OPTIMIZER_TIMEOUT_MS = 180_000
 
 /**
  * Reads optimizer configuration from the environment.
@@ -67,14 +70,15 @@ export function readOptimizerConfig(): OptimizerConfig {
   // Non-numeric values fall back to the documented 60s default.
   const rawTimeout = Number(process.env.BYTEME_OPTIMIZER_TIMEOUT_MS)
   const timeoutMs =
-    Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.trunc(rawTimeout) : 60_000
+    Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.trunc(rawTimeout) : DEFAULT_OPTIMIZER_TIMEOUT_MS
 
   return {
     enabled: process.env.BYTEME_OPTIMIZER_ENABLED === 'true',
     transport: (process.env.BYTEME_OPTIMIZER_TRANSPORT ?? 'http').trim().toLowerCase(),
     pythonExecutable: (process.env.BYTEME_OPTIMIZER_PYTHON_EXECUTABLE ?? '').trim(),
+    // An empty value (as copied from .env.example) means "use the default", the repository root.
     pythonWorkingDirectory: (
-      process.env.BYTEME_OPTIMIZER_PYTHON_WORKING_DIRECTORY ??
+      process.env.BYTEME_OPTIMIZER_PYTHON_WORKING_DIRECTORY?.trim() ||
       resolve(process.cwd(), '..')
     ).trim(),
     baseUrl: (process.env.BYTEME_OPTIMIZER_BASE_URL ?? '').trim(),

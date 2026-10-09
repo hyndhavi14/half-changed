@@ -1,0 +1,81 @@
+.figure { display: flex; flex-direction: column; gap: 8px; margin: 0; min-width: 0; }
+
+.readout {
+  min-height: 24px;
+  margin: 0;
+  color: var(--espresso);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.body { display: flex; gap: 10px; min-width: 0; }
+
+.yAxis {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 58px;
+  height: 120px;
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.scroller { flex: 1; min-width: 0; overflow-x: auto; }
+.plot { display: flex; flex-direction: column; gap: 4px; }
+
+.columns {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 120px;
+  border-bottom: 1.5px solid var(--line-strong);
+}
+
+.column {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.column > span { width: 100%; border-radius: 3px 3px 0 0; }
+.column:hover, .active { background: var(--sand); }
+.column:focus-visible { outline: 2px solid var(--espresso); outline-offset: 1px; }
+.active > span { box-shadow: 0 0 0 2px var(--espresso); }
+
+.band_peak { background: var(--terracotta); }
+.band_mid { background: var(--tariff-mid); }
+.band_off { background: var(--tariff-off); border: 1px solid var(--line-strong); }
+.none { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line-strong) 4px 6px); }
+
+.xAxis {
+  display: flex;
+  gap: 2px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.xAxis span { flex: 1; min-width: 0; overflow: visible; white-space: nowrap; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.zone { margin-left: auto; }
+
+.empty { margin: 0; color: var(--text-2); font-size: var(--fs-caption); }

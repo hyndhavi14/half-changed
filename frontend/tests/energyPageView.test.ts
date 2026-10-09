@@ -142,3 +142,10 @@ test('source tags label simulated data as simulated, never measured', () => {
   assert.deepEqual(sourceTag('Measured'), { provenance: 'measured', label: 'Measured' })
   assert.equal(sourceTag('Not available'), null)
 })
+
+test('consumption marked as not recorded stays null instead of a fake zero', async () => {
+  const { fullDayPoints: points, readingsSummary: summary } = await import('../src/pages/EnergyPage/energyPageView.ts')
+  const rows = [{ recorded_at: '2026-01-05T12:00:00Z', interval_minutes: 15, generation_kwh: 3, consumption_kwh: 0, metadata: { consumption_recorded: false } }]
+  assert.deepEqual(points(rows, 'UTC', '2026-01-05')[12], { hour: 12, generationKwh: 3, consumptionKwh: null })
+  assert.equal(summary(rows, 'UTC').consumptionKwh, null)
+})

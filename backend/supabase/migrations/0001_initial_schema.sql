@@ -516,5 +516,4 @@ begin
   -- policies, the anonymous role is denied on every table. Add an explicit
   -- policy here if a public read-only view is ever required.
 end;
-end;
 $$;

@@ -140,7 +140,14 @@ function mapScheduleEntry(value: unknown, scheduleId: string): ScheduleEntryData
     starts_at: startsAt,
     ends_at: endsAt,
     sequence: value.sequence,
+    power_kw: optionalNumber(value.power_kw),
   };
+}
+
+function optionalNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const number = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 export function mapBackendSchedule(
@@ -277,6 +284,62 @@ export class ApiMachineDataProvider implements MachineDataProvider {
       throw new Error('Backend schedule response has an invalid data envelope.');
     }
     return mapBackendSchedule(payload.data, this.opts.factoryId, this.opts.scheduleId);
+  }
+
+  /** Factory name and IANA time zone, so planned times match the main app. */
+  async getFactoryInfo(signal?: AbortSignal): Promise<{ name: string; timeZone: string | null }> {
+    const payload = await this.requestJson(this.url(`/factories/${encodeURIComponent(this.opts.factoryId)}`), signal);
+    const data = record(payload) && record(payload.data) ? payload.data : null;
+    if (!data) throw new Error('Backend factory response has an invalid data envelope.');
+    return {
+      name: typeof data.name === 'string' ? data.name : 'Factory',
+      timeZone: typeof data.timezone === 'string' && data.timezone ? data.timezone : null,
+    };
+  }
+
+  /** Process UUID -> name, so planned runs show readable names instead of UUIDs. */
+  async getProcessNames(signal?: AbortSignal): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const limit = 200;
+    for (let offset = 0; offset < 10_000; offset += limit) {
+      const payload = await this.requestJson(
+        this.url(`/factories/${encodeURIComponent(this.opts.factoryId)}/processes?limit=${limit}&offset=${offset}`),
+        signal,
+      );
+      if (!record(payload) || !Array.isArray(payload.data)) throw new Error('Backend processes response has an invalid data envelope.');
+      for (const row of payload.data) {
+        if (record(row) && typeof row.id === 'string' && typeof row.name === 'string') names.set(row.id, row.name);
+      }
+      if (payload.data.length < limit) break;
+    }
+    return names;
+  }
+
+  /** Stored site-level energy readings between two instants (used for the solar profile). */
+  async getEnergyRows(from: string, to: string, signal?: AbortSignal): Promise<
+    { recorded_at: string; generation_kwh: number | null; interval_minutes: number; machine_id: string | null }[]
+  > {
+    const rows: { recorded_at: string; generation_kwh: number | null; interval_minutes: number; machine_id: string | null }[] = [];
+    const limit = 200;
+    for (let offset = 0; offset < 20_000; offset += limit) {
+      const query = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=${limit}&offset=${offset}&sort=recorded_at`;
+      const payload = await this.requestJson(
+        this.url(`/factories/${encodeURIComponent(this.opts.factoryId)}/energy-data?${query}`),
+        signal,
+      );
+      if (!record(payload) || !Array.isArray(payload.data)) throw new Error('Backend energy response has an invalid data envelope.');
+      for (const row of payload.data) {
+        if (!record(row) || typeof row.recorded_at !== 'string') continue;
+        rows.push({
+          recorded_at: row.recorded_at,
+          generation_kwh: optionalNumber(row.generation_kwh),
+          interval_minutes: optionalNumber(row.interval_minutes) ?? 15,
+          machine_id: typeof row.machine_id === 'string' ? row.machine_id : null,
+        });
+      }
+      if (payload.data.length < limit) break;
+    }
+    return rows;
   }
 
   async getMachine(id: string): Promise<MachineData | undefined> {

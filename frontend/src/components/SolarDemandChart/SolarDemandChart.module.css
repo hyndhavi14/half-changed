@@ -152,3 +152,12 @@ button.column:focus-visible { outline: 3px solid var(--focus-ring); outline-offs
 .keyPeak { background: var(--terracotta); }
 .keyMid { background: var(--tariff-mid); }
 .keyOff { background: var(--tariff-off); }
+
+.readout {
+  min-height: 24px;
+  margin: 0 0 8px;
+  color: var(--espresso);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}

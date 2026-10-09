@@ -175,16 +175,7 @@
   color: var(--terra-soft);
 }
 
-.launcherDetails {
-  border-radius: var(--radius-control);
-}
 
-.launcherSummary {
-  cursor: pointer;
-  color: var(--side-text);
-  font-weight: 700;
-  padding: 8px 4px;
-}
 
 .menuToggle {
   display: none;

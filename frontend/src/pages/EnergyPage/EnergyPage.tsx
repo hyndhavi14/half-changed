@@ -6,12 +6,17 @@ import Legend from '../../components/Legend/Legend'
 import PageHeader from '../../components/PageHeader/PageHeader'
 import ProgressBar from '../../components/ProgressBar/ProgressBar'
 import ProvenanceTag from '../../components/ProvenanceTag/ProvenanceTag'
+import CompareCard from '../../components/CompareCard/CompareCard'
 import ImpactTile from '../../components/ImpactTile/ImpactTile'
-import StatTile from '../../components/StatTile/StatTile'
+import OptimizationStatus from '../../components/OptimizationStatus/OptimizationStatus'
 import { useFactory } from '../../context/useFactory'
+import type { BackendFactoryData } from '../../data/backendApi'
+import { solarShiftScope } from '../../data/solarShiftScope'
+import { useOptimizationState } from '../../data/useOptimizationState'
 import { displayTimestamp, displayValue, findStoredSchedule } from '../../data/backendView'
-import { optimizationOutcome, schedulePair, solarAvailableKwh, type ScheduleTotals } from '../../data/factoryInsight'
+import { optimizationOutcome, schedulePair, type ScheduleTotals } from '../../data/factoryInsight'
 import { formatCurrency, formatKwh, formatPercent } from '../../data/format'
+import { beforeAfterMetrics } from '../../data/insightView'
 import {
   NOT_AVAILABLE,
   energyDays,
@@ -30,7 +35,6 @@ import {
   formatMoney,
   formatNumber,
   fullDayPoints,
-  plannedTotals,
   readingsSummary,
   readingsSummaryText,
   tariffWindowLines,
@@ -56,23 +60,23 @@ function rowText(row: Record<string, unknown>, key: string): string {
 
 export default function EnergyPage() {
   const { backendData, loading, error } = useFactory()
-  const [chosenDay, setChosenDay] = useState<string | null>(null)
-
   if (!backendData) {
     return <PageHeader eyebrow={loading ? 'Loading persisted factory data' : 'Factory data unavailable'} title={error ?? 'No factory selected'} />
   }
+  return <EnergyContent key={backendData.factory.id} data={backendData} />
+}
 
-  const data = backendData
+function EnergyContent({ data }: { data: BackendFactoryData }) {
+  const [chosenDay, setChosenDay] = useState<string | null>(null)
+  const pair = schedulePair(data)
+  const { state, optimizing, run } = useOptimizationState(data, pair)
   const timeZone = data.factory.timezone
   const currency = data.factory.currency
   const optimized = findStoredSchedule(data, 'optimized')
-  const totals = plannedTotals(optimized)
   const modeledTag = <ProvenanceTag provenance="modeled" />
-  const tileSub = optimized ? 'Optimized schedule' : 'No optimized schedule yet'
-  const outcome = optimizationOutcome(schedulePair(data))
-  const solarAvailable = solarAvailableKwh(data, optimized)
-  const utilization = solarAvailable && outcome.optimized.solarKwh !== null ? (outcome.optimized.solarKwh / solarAvailable) * 100 : null
-  const utilizationBaseline = solarAvailable && outcome.baseline.solarKwh !== null && outcome.comparable ? (outcome.baseline.solarKwh / solarAvailable) * 100 : null
+  const outcome = optimizationOutcome(pair)
+  const scope = solarShiftScope(data.factory)
+  const plannedKwh = (totals: typeof outcome.optimized) => (totals.solarKwh === null || totals.gridKwh === null ? null : totals.solarKwh + totals.gridKwh)
 
   const days = energyDays(data.energy, timeZone)
   const fallbackDay = defaultEnergyDay(data.energy, timeZone)
@@ -106,17 +110,41 @@ export default function EnergyPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader eyebrow={`${data.factory.name} · ${timeZone}`} title="Energy, solar & savings" />
+      <PageHeader eyebrow={`${data.factory.name} · ${timeZone}`} title={scope.enabled ? 'Energy, solar & savings' : 'Energy & modeled cost'} />
+      <OptimizationStatus state={state} onRun={run} running={optimizing} compact />
 
-      <section className={styles.impact} aria-label="What SolarShift achieved">
+      <section className={styles.impact} aria-label={scope.enabled ? 'What SolarShift achieved' : 'Modeled energy cost'}>
         <div className={styles.impactHead}>
-          <h2>What SolarShift achieved</h2>
+          <h2>{scope.enabled ? 'What SolarShift achieved' : 'Modeled energy cost'}</h2>
           <p>
             {outcome.comparable
-              ? 'Optimized schedule compared with the baseline schedule for the same processes and horizon. All values are modeled by the optimizer, not metered savings.'
+              ? (scope.enabled
+                  ? 'After SolarShift compared with before, for the same processes. Values are modeled by the optimizer, not metered.'
+                  : 'Optimized schedule compared with the baseline schedule, for the same processes. Values are modeled by the optimizer from the stored tariff, not metered.')
               : 'A comparable baseline and optimized schedule pair is needed before savings can be shown. Run the optimizer from the dashboard.'}
           </p>
         </div>
+        {state.showResults ? (
+          <>
+        {!scope.enabled && (
+          <div className={styles.impactGrid}>
+            <ImpactTile
+              label="Modeled cost saved"
+              value={outcome.costSaved === null ? NOT_AVAILABLE : formatCurrency(outcome.costSaved, currency)}
+              sub={outcome.costSaved === null ? undefined : `${formatCurrency(outcome.baseline.cost, currency)} → ${formatCurrency(outcome.optimized.cost, currency)}${outcome.costSavedPct === null ? '' : ` · ${formatPercent(outcome.costSavedPct, 1)} lower`}`}
+              tone={outcome.costSaved === null ? 'neutral' : outcome.costSaved > 0 ? 'good' : outcome.costSaved < 0 ? 'bad' : 'neutral'}
+              provenance={outcome.costSaved === null ? undefined : modeledTag}
+            />
+            <ImpactTile
+              label="Planned energy"
+              value={plannedKwh(outcome.optimized) === null ? NOT_AVAILABLE : formatKwh(plannedKwh(outcome.optimized))}
+              sub="process power × scheduled time"
+              tone="neutral"
+              provenance={plannedKwh(outcome.optimized) === null ? undefined : modeledTag}
+            />
+          </div>
+        )}
+        {scope.enabled && (
         <div className={styles.impactGrid}>
           <ImpactTile
             label="Grid energy saved"
@@ -147,37 +175,20 @@ export default function EnergyPage() {
             provenance={gridShare(outcome.optimized) === null ? undefined : modeledTag}
           />
         </div>
-        <div className={styles.stats}>
-          <StatTile
-            label="Solar available"
-            value={solarAvailable === null ? NOT_AVAILABLE : formatKwh(solarAvailable)}
-            sub={solarAvailable === null ? 'Solar data not available for this factory’s horizon' : 'Across the planning horizon'}
-            provenance={solarAvailable === null || !dayTag ? undefined : <ProvenanceTag provenance={dayTag.provenance} label={dayTag.label} />}
-          />
-          <StatTile
-            label="Solar utilization"
-            value={utilization === null ? NOT_AVAILABLE : formatPercent(utilization, 1)}
-            sub={utilizationBaseline === null ? 'Solar used ÷ solar available' : `was ${formatPercent(utilizationBaseline, 1)} in the baseline`}
-            provenance={utilization === null ? undefined : modeledTag}
-          />
-          <StatTile
-            label="Grid energy"
-            value={formatKwh(outcome.optimized.gridKwh)}
-            sub={tileSub}
-            provenance={outcome.optimized.gridKwh === null ? undefined : modeledTag}
-          />
-          <StatTile
-            label="Modeled cost"
-            value={formatMoney(totals.cost, currency)}
-            sub={chargesNote ? 'Energy only, excludes other charges' : tileSub}
-            provenance={totals.cost === null ? undefined : modeledTag}
-          />
-        </div>
+        )}
+            {outcome.comparable && (
+              <CompareCard title="Baseline vs optimized energy" compare={beforeAfterMetrics(outcome, currency).filter((metric) => metric.label !== 'Savings' && metric.label !== 'Production' && (scope.enabled || !/solar|grid/i.test(metric.label)))} provenance={modeledTag} />
+            )}
+          </>
+        ) : (
+          <p className={styles.emptyImpact}>No optimized energy result available for {data.factory.name} yet.</p>
+        )}
         {currency !== 'INR' && (
           <p className={styles.currencyNote}>Costs for {data.factory.name} are stored in {currency} and shown as stored. They are not converted to ₹.</p>
         )}
       </section>
 
+      {scope.enabled && (
       <Card
         title="Hourly energy use"
         provenance={dayTag ? <ProvenanceTag provenance={dayTag.provenance} label={dayTag.label} /> : undefined}
@@ -237,6 +248,7 @@ export default function EnergyPage() {
           </details>
         )}
       </Card>
+      )}
 
       <Card title="Cost by tariff band" provenance={optimized ? modeledTag : undefined}>
         {!optimized ? (
@@ -266,7 +278,7 @@ export default function EnergyPage() {
         )}
         <p className={styles.allocationNote}>
           {optimized
-            ? `Planned energy of the optimized schedule, assigned to the tariff band in force at each moment. Entry costs come from the optimizer and are split by time; ${allocation.spanningEntries === 0 ? 'no entry spans two bands, so the split is exact.' : `${allocation.spanningEntries} ${allocation.spanningEntries === 1 ? 'entry spans' : 'entries span'} two bands, so ${allocation.spanningEntries === 1 ? 'its' : 'their'} split is approximate.`}`
+            ? `Planned energy of the optimized schedule, assigned to the tariff band in force at each moment. ${scope.enabled ? 'Only grid energy is charged, so solar-covered energy shows little or no cost.' : 'Energy covered by on-site generation in the stored readings is not charged, so some energy shows little or no cost.'} Entry costs come from the optimizer and are split by time; ${allocation.spanningEntries === 0 ? 'no entry spans two bands, so the split is exact.' : `${allocation.spanningEntries} ${allocation.spanningEntries === 1 ? 'entry spans' : 'entries span'} two bands, so ${allocation.spanningEntries === 1 ? 'its' : 'their'} split is approximate.`}`
             : ''}
           {windows.length === 0 ? ' No electricity tariffs are configured for this factory.' : ''}
         </p>

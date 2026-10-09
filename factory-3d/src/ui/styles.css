@@ -11,7 +11,7 @@
 
   position: relative; width: 100%; height: 100%; overflow: hidden;
   background: var(--scene-bg); color: var(--ink);
-  font-family: 'Atkinson Hyperlegible', 'Segoe UI', system-ui, sans-serif; font-size: 15px; line-height: 1.45;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif; font-size: 15px; line-height: 1.45;
   box-sizing: border-box;
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -193,3 +193,18 @@
 @media (prefers-reduced-motion: reduce) {
   .bm-twin .toast, .bm-twin .ebar i { transition: none; }
 }
+
+/* plan-time control (planned schedule playback) */
+.bm-twin .plan-time { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 4; display: flex; align-items: center; gap: 12px; width: min(560px, calc(100% - 600px)); min-width: 320px; padding: 10px 14px; }
+.bm-twin .plan-time label { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.bm-twin .plan-time .plan-label { font-size: 13px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bm-twin .plan-time .plan-label strong { color: var(--ink); }
+.bm-twin .plan-time input { width: 100%; accent-color: var(--accent); }
+@media (max-width: 900px) {
+  .bm-twin .plan-time { left: 12px; right: 12px; transform: none; width: auto; min-width: 0; bottom: 200px; }
+}
+.bm-twin .energy-note { margin: 6px 0 0; font-size: 12px; color: var(--ink-2); }
+
+/* embedded in the ByteMe frontend: the host page already shows the schedule summary */
+.bm-twin.is-embedded .bm-data-state { display: none; }
+@media (max-width: 1100px) { .bm-twin.is-embedded .mini { display: none; } }

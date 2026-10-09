@@ -16,9 +16,14 @@ export function optimizerCardText(input: {
   timeZone: string | null
   optimizing: boolean
   hasData: boolean
+  /** The run started in this session for the selected factory failed. */
+  sessionFailed?: boolean
 }): OptimizerCardText {
   if (input.optimizing) {
     return { title: 'Optimization running', detail: 'Waiting for the optimizer result' }
+  }
+  if (input.sessionFailed) {
+    return { title: 'Optimization failed', detail: 'The last run did not return a new schedule' }
   }
   if (!input.hasData) {
     return { title: 'Optimizer', detail: 'Status not available' }

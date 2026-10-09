@@ -4,7 +4,7 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UpstreamError } from '@/lib/errors'
-import { invokePython, PythonSubprocessOptimizerTransport } from '@/lib/optimizer/pythonSubprocess'
+import { classifyPythonFailure, invokePython, PYTHON_ENVIRONMENT_KEYS, PythonSubprocessOptimizerTransport } from '@/lib/optimizer/pythonSubprocess'
 import {
   canonicalSevenDayPythonProblem,
   pythonTestProblem,
@@ -96,8 +96,10 @@ describe('Python subprocess transport protocol', () => {
 
   it('rejects a non-zero exit without exposing stderr contents', async () => {
     const child = childProcess()
-    child.stderr.emit('data', Buffer.from('private traceback details'))
-    child.stdin.on('finish', () => child.emit('close', 2))
+    child.stdin.on('finish', () => {
+      child.stderr.emit('data', Buffer.from('private traceback details'))
+      child.emit('close', 2)
+    })
 
     await expect(invokePython(
       'python-test',
@@ -111,6 +113,35 @@ describe('Python subprocess transport protocol', () => {
       status: 502,
       details: { reason: 'process_failed', exit_code: 2 },
     })
+  })
+
+  it('names a missing OR-Tools install without exposing the traceback', async () => {
+    const child = childProcess()
+    child.stdin.on('finish', () => {
+      child.stderr.emit('data', Buffer.from("Traceback (most recent call last):\n  File \"C:\\Users\\secret\\x.py\"\nModuleNotFoundError: No module named 'ortools'"))
+      child.emit('close', 1)
+    })
+    const failure = invokePython('python-test', 'C:\\optimizer', 1000, {}, 'req', undefined, fakeSpawn(child))
+    await expect(failure).rejects.toMatchObject({ status: 502, details: { reason: 'missing_ortools', exit_code: 1 } })
+    await expect(failure).rejects.toThrow(/pip install ortools/)
+    await expect(failure).rejects.not.toThrow(/secret/)
+  })
+
+  it('passes the Windows per-user site-packages locations but no secrets to Python', () => {
+    expect(PYTHON_ENVIRONMENT_KEYS).toEqual(expect.arrayContaining(['APPDATA', 'LOCALAPPDATA', 'PATH', 'SystemRoot']))
+    expect(PYTHON_ENVIRONMENT_KEYS.some((key) => /KEY|SECRET|TOKEN|SUPABASE/i.test(key))).toBe(false)
+  })
+
+  it('classifies the common Windows Python failures', () => {
+    expect(classifyPythonFailure(3, "ImportError: No module named 'optimizer'").reason).toBe('optimizer_package_not_found')
+    expect(classifyPythonFailure(3, "ImportError: No module named 'ortools.sat'").reason).toBe('missing_ortools')
+    expect(classifyPythonFailure(9009, '').reason).toBe('python_not_found')
+    expect(classifyPythonFailure(3, "ImportError: No module named 'ortools.sat.python.cp_model_helper' | DLL load failed while importing cp_model_helper: An Application Control policy has blocked this file.").reason).toBe('blocked_by_application_control')
+    expect(classifyPythonFailure(1, 'OSError: [WinError 4551] An Application Control policy has blocked this file').reason).toBe('blocked_by_application_control')
+    expect(classifyPythonFailure(3, "ImportError: No module named 'ortools' | DLL load failed while importing _pywrapcp: The specified module could not be found.").reason).toBe('native_library_failed')
+    expect(classifyPythonFailure(1, 'Python was not found; run without arguments to install from the Microsoft Store').reason).toBe('python_not_found')
+    expect(classifyPythonFailure(2, 'ValueError: optimizer runner failed')).toEqual({ reason: 'optimizer_exception', message: 'Python optimizer raised ValueError while solving.' })
+    expect(classifyPythonFailure(1, 'segfault').reason).toBe('process_failed')
   })
 
   it('rejects malformed JSON output', async () => {
